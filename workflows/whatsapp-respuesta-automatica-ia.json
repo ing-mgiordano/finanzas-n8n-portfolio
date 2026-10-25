@@ -1,0 +1,342 @@
+{
+  "name": "WhatsApp - Respuesta automática con IA (personal)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-auto-ia",
+        "responseMode": "onReceived",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "name": "WAHA - Mensaje entrante",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "84558d71-29ca-4fae-aa41-a67919558dfa"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// ===== CONFIGURACIÓN =====\n// Números que NUNCA reciben respuesta automática (solo dígitos, con código de país, sin +).\nconst EXCLUIDOS = [\n  // '5491112345678',\n];\nconst MAX_RESPUESTAS_POR_HORA = 10; // por chat, evita bucles con otros bots\nconst MAX_ANTIGUEDAD_SEG = 120;     // ignora mensajes viejos (al reconectar WAHA)\n// =========================\n\nconst estado = $getWorkflowStaticData('global');\nif (estado.ausente === undefined) estado.ausente = false;\nif (!estado.nota) estado.nota = '';\nif (!estado.contador) estado.contador = {};\n\nconst evento = $input.first().json.body || {};\nconst msg = evento.payload || {};\nconst texto = (msg.body || '').trim();\nconst chatId = msg.fromMe ? msg.to : msg.from;\n\nif (!['message', 'message.any'].includes(evento.event) || !chatId) return [];\n\n// Comandos: los escribís vos (fromMe) en el chat \"Mensaje a mí mismo\"\nif (msg.fromMe) {\n  const m = texto.match(/^\\/ausente\\s+(on|off|estado)\\b\\s*(.*)$/is);\n  if (!m) return []; // tus mensajes normales (y las respuestas del bot) se ignoran\n  const accion = m[1].toLowerCase();\n  if (accion === 'on') {\n    estado.ausente = true;\n    estado.nota = m[2].trim();\n  } else if (accion === 'off') {\n    estado.ausente = false;\n    estado.nota = '';\n  }\n  const resumen = estado.ausente\n    ? `🤖 Modo ausente ACTIVADO${estado.nota ? ` (nota: \"${estado.nota}\")` : ''}.`\n    : '🤖 Modo ausente DESACTIVADO.';\n  return [{ json: { tipo: 'comando', session: evento.session, chatId, respuesta: resumen } }];\n}\n\n// Solo chats privados (descarta grupos, estados, canales, broadcast)\nif (!/@(c\\.us|s\\.whatsapp\\.net|lid)$/.test(chatId)) return [];\nif (!estado.ausente) return [];\nif (!texto || msg.hasMedia) return [];\nif (msg.timestamp && Date.now() / 1000 - msg.timestamp > MAX_ANTIGUEDAD_SEG) return [];\n\nconst numero = chatId.split('@')[0];\nif (EXCLUIDOS.includes(numero)) return [];\n\n// Límite de respuestas por chat y por hora\nconst hora = Math.floor(Date.now() / 3600000);\nconst c = estado.contador[chatId];\nconst usados = c && c.hora === hora ? c.n : 0;\nif (usados >= MAX_RESPUESTAS_POR_HORA) return [];\nestado.contador[chatId] = { hora, n: usados + 1 };\nfor (const k of Object.keys(estado.contador)) {\n  if (estado.contador[k].hora !== hora) delete estado.contador[k];\n}\n\nreturn [{\n  json: {\n    tipo: 'mensaje',\n    session: evento.session,\n    chatId,\n    nombre: (msg._data && msg._data.notifyName) || '',\n    texto,\n    nota: estado.nota,\n  },\n}];\n"
+      },
+      "name": "Filtrar y procesar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.tipo }}",
+              "rightValue": "comando",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "¿Es comando /ausente?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://waha:3000/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: $json.session, chatId: $json.chatId, text: $json.respuesta }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "name": "Confirmar comando",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        120
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR",
+          "name": "WAHA API Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://waha:3000/api/startTyping",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: $json.session, chatId: $json.chatId }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "name": "Mostrar \"escribiendo...\"",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        400
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR",
+          "name": "WAHA API Key"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Filtrar y procesar').item.json.texto }}",
+        "options": {
+          "systemMessage": "=Sos el asistente automático del WhatsApp personal de su dueño, que en este momento no está disponible.\nFecha y hora actual: {{ $now.setZone('America/Argentina/Buenos_Aires').toFormat(\"cccc d 'de' LLLL, HH:mm\", { locale: 'es' }) }}.\n{{ $('Filtrar y procesar').item.json.nota ? 'Nota del dueño sobre su ausencia: ' + $('Filtrar y procesar').item.json.nota : 'El dueño no dejó nota sobre su ausencia.' }}\n{{ $('Filtrar y procesar').item.json.nombre ? 'La persona que escribe se llama (según su perfil): ' + $('Filtrar y procesar').item.json.nombre : '' }}\n\nReglas:\n- Respondé en español rioplatense, cordial y breve (1 a 3 frases), como un mensaje de WhatsApp. Sin markdown.\n- En tu primera respuesta de la conversación aclará que sos una respuesta automática y que el dueño va a responder personalmente cuando pueda.\n- Si la nota del dueño indica hasta cuándo no está o cómo contactarlo, podés compartirlo.\n- Podés tomar el mensaje (\"le paso que...\") y responder dudas simples, pero NUNCA confirmes citas, pagos, favores, precios ni compromisos en nombre del dueño. No inventes información sobre él.\n- No compartas datos personales del dueño (dirección, teléfono, ubicación, finanzas).\n- Si parece una urgencia, sugerí llamar por teléfono.\n- Si el mensaje es solo un saludo o un agradecimiento final, respondé muy corto.",
+          "maxIterations": 3
+        }
+      },
+      "name": "Agente de respuesta",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        900,
+        400
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-haiku-5-5"
+        },
+        "options": {
+          "maxTokensToSample": 400,
+          "temperature": 0.5
+        }
+      },
+      "name": "Claude Haiku",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.6,
+      "position": [
+        840,
+        620
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REEMPLAZAR",
+          "name": "Anthropic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Filtrar y procesar').item.json.chatId }}",
+        "contextWindowLength": 20
+      },
+      "name": "Memoria por chat",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.4,
+      "position": [
+        1000,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://waha:3000/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: $('Filtrar y procesar').item.json.session, chatId: $('Filtrar y procesar').item.json.chatId, text: $json.output }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "name": "Enviar respuesta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1160,
+        320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR",
+          "name": "WAHA API Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://waha:3000/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: $('Filtrar y procesar').item.json.session, chatId: $('Filtrar y procesar').item.json.chatId, text: '🤖 Respuesta automática: ahora no estoy disponible, te contesto apenas pueda.' }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "name": "Enviar respuesta de respaldo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1160,
+        500
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR",
+          "name": "WAHA API Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "WAHA - Mensaje entrante": {
+      "main": [
+        [
+          {
+            "node": "Filtrar y procesar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar y procesar": {
+      "main": [
+        [
+          {
+            "node": "¿Es comando /ausente?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es comando /ausente?": {
+      "main": [
+        [
+          {
+            "node": "Confirmar comando",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mostrar \"escribiendo...\"",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mostrar \"escribiendo...\"": {
+      "main": [
+        [
+          {
+            "node": "Agente de respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente de respuesta": {
+      "main": [
+        [
+          {
+            "node": "Enviar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar respuesta de respaldo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Haiku": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agente de respuesta",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memoria por chat": {
+      "ai_memory": [
+        [
+          {
+            "node": "Agente de respuesta",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Argentina/Buenos_Aires"
+  }
+}

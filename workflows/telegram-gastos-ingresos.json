@@ -1,0 +1,732 @@
+{
+  "name": "Telegram - Registro de Gastos e Ingresos (Claude + Sheets)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {
+          "chatIds": "TU_CHAT_ID_TELEGRAM"
+        }
+      },
+      "id": "4a5740b0-c54e-443c-8475-ce9eef624115",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        32,
+        304
+      ],
+      "webhookId": "b599350b-d03a-4403-ad68-a759a41db881",
+      "credentials": {
+        "telegramApi": {
+          "id": "TU_CREDENCIAL_TELEGRAM",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrae texto y chat del update de Telegram y calcula fechas de referencia en Córdoba\n// (hoy e inicio de semana/mes/año) para que Claude resuelva los períodos de las consultas.\n// Comandos (/start, /help) y mensajes sin texto (fotos, audios) salen con texto vacío\n// y reciben el mensaje de ayuda sin pasar por Claude.\nconst hoy = $now.setZone('America/Argentina/Cordoba');\nconst f = d => d.toFormat('dd-MM-yyyy');\nconst DIAS = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];\nconst TIPOS = ['photo', 'voice', 'audio', 'video', 'document', 'sticker', 'location', 'contact'];\n\nconst salida = [];\nfor (const item of $input.all()) {\n  const m = item.json.message;\n  if (!m || !m.chat) continue;\n\n  const textoCrudo = typeof m.text === 'string' ? m.text.trim() : '';\n  salida.push({\n    json: {\n      texto: textoCrudo.startsWith('/') ? '' : textoCrudo,\n      tipo_mensaje: textoCrudo ? 'text' : (TIPOS.find(t => m[t]) || 'otro'),\n      chat_id: m.chat.id,\n      nombre: (m.from && m.from.first_name) || '',\n      message_id: m.message_id,\n      fecha_hoy: f(hoy),\n      dia_semana: DIAS[hoy.weekday - 1],\n      inicio_semana: f(hoy.startOf('week')),\n      inicio_mes: f(hoy.startOf('month')),\n      inicio_anio: f(hoy.startOf('year')),\n    },\n  });\n}\n\nreturn salida;"
+      },
+      "id": "6a5ee9a0-199b-4e82-92ff-dd1d4a7e0f22",
+      "name": "Extraer datos del mensaje",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.texto }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c2d0646c-eafa-4557-8fe8-459866d14d11",
+      "name": "¿Tiene texto?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-haiku-5-5"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $json.texto }}"
+            }
+          ]
+        },
+        "options": {
+          "includeMergedResponse": true,
+          "system": "=Eres un asistente experto en finanzas personales. Recibes un mensaje de chat que puede ser (a) un gasto o ingreso para registrar, (b) una consulta sobre totales de un período, o (c) una pregunta sobre cuánto dinero tiene disponible. Devuelve SIEMPRE un objeto JSON estricto.\n\nFECHA DE HOY (Sistema): {{ $json.fecha_hoy }} ({{ $json.dia_semana }})\nFECHAS DE REFERENCIA: esta semana empezó el {{ $json.inicio_semana }} (lunes); este mes empezó el {{ $json.inicio_mes }}; este año empezó el {{ $json.inicio_anio }}.\n\nCATEGORÍAS PERMITIDAS (selecciona la más adecuada):\n- Alimentación / Supermercado\n- Salidas / Ocio\n- Servicios y Suscripciones\n- Salud y Deporte (médicos, prepaga, estudios, gimnasio, deportes)\n- Farmacia (medicamentos y compras en farmacia)\n- Transporte / Vehículo\n- Indumentaria / Compras\n- Vivienda / Hogar\n- Educación / Cursos\n- Donaciones (donaciones, caridad, colectas, aportes a ONG)\n- Ingresos / Sueldo / Extras\n- Otros\n\nMÉTODOS DE PAGO HABITUALES:\n- Mercado Pago, Efectivo, Tarjeta de Crédito, Tarjeta de Débito, Transferencia, Revolut, Santander, Supervielle.\n- Si el mensaje nombra la entidad, inclúyela en metodo_pago (ej. 'Tarjeta de Débito Supervielle', 'Transferencia Mercado Pago', 'Tarjeta de Crédito Santander'). Si no dice cómo pagó, deja metodo_pago vacío.\n\nREGLAS DE PROCESAMIENTO:\n1. Moneda: si el mensaje menciona euros, € o EUR usa 'EUR'; si menciona dólares, USD, u$s o US$ usa 'USD'. Si no especifica la moneda, asume por defecto 'ARS'.\n2. Si el mensaje indica entrada de dinero (cobro, sueldo, regalo, venta, etc.), el 'tipo' es 'INGRESO'. Si es un pago o compra, el 'tipo' es 'GASTO'.\n3. Pago del resumen de una tarjeta de crédito (ej. 'pagué la Visa con Supervielle'): tipo 'GASTO', categoría 'Otros', en metodo_pago pon la cuenta con la que pagó (ej. 'Transferencia Supervielle', nunca 'Tarjeta de Crédito') y en notas 'Pago resumen'.\n4. SALDOS: si el mensaje pregunta cuánto dinero TIENE o le QUEDA disponible (ej. '¿cuánto tengo?', 'mis saldos', '¿cuántos dólares tengo?', '¿cuánto me queda en euros?', 'saldo'), usa tipo 'SALDOS', deja monto en 0 y los demás campos vacíos. No confundir con CONSULTA: SALDOS es el dinero disponible ahora; CONSULTA es cuánto gastó o cobró en un período.\n5. CONSULTAS: si el mensaje es una PREGUNTA o PEDIDO DE RESUMEN sobre cuánto gastó, cobró o lleva acumulado en un período (ej. '¿cuánto gasté hoy?', 'gastos de la semana', 'total del mes', 'cuánto llevo gastado este año', 'gastos en salidas de octubre', 'ingresos desde el 1/9', 'balance del mes'), usa tipo 'CONSULTA' y completa:\n   - consulta_desde y consulta_hasta (DD-MM-YYYY, ambos inclusive).\n   - consulta_tipo: 'GASTO' si pregunta por gastos (o no aclara); 'INGRESO' si pregunta por ingresos o cobros; 'AMBOS' si pide balance, resumen general o movimientos.\n   - consulta_categoria: exactamente una de las categorías permitidas si la menciona (solo el nombre, sin lo que está entre paréntesis); si no, ''.\n   - consulta_titulo: frase corta para el título (ej. 'hoy', 'esta semana', 'octubre 2026', 'en lo que va del año').\n   Períodos: 'hoy'/'diario' = hoy a hoy; 'ayer' = ayer a ayer; 'semana'/'semanal' = inicio de semana a hoy; 'mes'/'mensual' = inicio de mes a hoy; 'año'/'anual'/'en lo que va del año' = inicio de año a hoy; 'semana pasada'/'mes pasado'/'año pasado' = ese período calendario anterior completo; 'últimos N días' = desde hoy menos N-1 días hasta hoy; un mes nombrado (ej. 'septiembre') = ese mes completo del año actual, o del año anterior si todavía no llegó; 'desde X' = X a hoy. Si no indica período, usa el mes actual hasta hoy.\n   En una CONSULTA deja monto en 0 y los campos del movimiento vacíos.\n6. Excepción / Mensajes Inválidos: si el mensaje no es un gasto, un ingreso, una consulta de totales ni una pregunta de saldos (por ejemplo, un saludo como 'hola' o un texto sin relación), asigna estrictamente el valor \"INVALIDO\" al campo tipo y deja los demás campos en blanco o con una descripción aclaratoria.\n7. Si el mensaje menciona cuotas (ej. 'en 3 cuotas', '3/6'), colócalo explícitamente en el campo 'notas'.\n8. Para gastos e ingresos utiliza la fecha de hoy provista por el sistema, salvo que el mensaje indique explícitamente otra fecha pasada o futura.\n9. El campo 'categoria' lleva solo el nombre de la categoría, sin lo que está entre paréntesis.\n10. Responde ÚNICAMENTE con un objeto JSON válido. No agregues texto introductorio, explicaciones ni bloques markdown adicionales.\n\nFORMATO DE SALIDA (JSON exacto):\n{\n  \"fecha\": \"DD-MM-YYYY\",\n  \"tipo\": \"GASTO\" | \"INGRESO\" | \"CONSULTA\" | \"SALDOS\" | \"INVALIDO\",\n  \"monto\": number,\n  \"moneda\": \"ARS\" | \"USD\" | \"EUR\",\n  \"categoria\": \"string\",\n  \"descripcion\": \"string\",\n  \"metodo_pago\": \"string\",\n  \"notas\": \"string\",\n  \"consulta_desde\": \"DD-MM-YYYY\",\n  \"consulta_hasta\": \"DD-MM-YYYY\",\n  \"consulta_tipo\": \"GASTO\" | \"INGRESO\" | \"AMBOS\",\n  \"consulta_categoria\": \"string\",\n  \"consulta_titulo\": \"string\"\n}",
+          "maxTokens": 500
+        }
+      },
+      "id": "efa08c62-61fa-484c-bde8-b50cb4a8eb6e",
+      "name": "Claude - Extraer transacción",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        576,
+        160
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Limpia la respuesta de Claude (bloques markdown, texto extra) y la parsea de forma segura.\n// Si algo no cierra, marca el mensaje como INVALIDO en vez de romper el flujo.\nconst origen = $('Extraer datos del mensaje').item.json;\nconst r = $json;\n\nlet crudo = '';\nif (typeof r.merged_response === 'string') crudo = r.merged_response;\nelse if (Array.isArray(r.content)) crudo = r.content.filter(c => c && c.type === 'text').map(c => c.text).join('\\n');\nelse if (typeof r.text === 'string') crudo = r.text;\nelse if (typeof r.output === 'string') crudo = r.output;\n\nlet limpio = String(crudo).replace(/```(?:json)?/gi, '').trim();\nconst ini = limpio.indexOf('{');\nconst fin = limpio.lastIndexOf('}');\nif (ini !== -1 && fin > ini) limpio = limpio.slice(ini, fin + 1);\n\nlet d = {};\nlet errorParseo = '';\ntry {\n  d = JSON.parse(limpio);\n  if (!d || typeof d !== 'object' || Array.isArray(d)) throw new Error('La respuesta no es un objeto JSON');\n} catch (e) {\n  d = {};\n  errorParseo = e.message;\n}\n\nconst CATEGORIAS = [\n  'Alimentación / Supermercado', 'Salidas / Ocio', 'Servicios y Suscripciones', 'Salud y Deporte',\n  'Farmacia', 'Transporte / Vehículo', 'Indumentaria / Compras', 'Vivienda / Hogar', 'Educación / Cursos',\n  'Donaciones', 'Ingresos / Sueldo / Extras', 'Otros',\n];\n// Por si Claude devuelve la categoría con la aclaración entre paréntesis\nconst limpiarCategoria = s => String(s || '').replace(/s*(.*)s*$/, '').trim();\nconst esFecha = s => /^\\d{2}-\\d{2}-\\d{4}$/.test(String(s || ''));\n\nconst tipoCrudo = String(d.tipo || '').toUpperCase().trim();\nlet tipo = ['GASTO', 'INGRESO', 'CONSULTA', 'SALDOS'].includes(tipoCrudo) ? tipoCrudo : 'INVALIDO';\nconst esMovimiento = t => t === 'GASTO' || t === 'INGRESO';\n\n// Acepta número o texto tipo \"15.000\", \"15.000,50\" o \"$ 2500\"\nlet monto = d.monto;\nif (typeof monto === 'string') {\n  monto = monto.replace(/[^\\d,.-]/g, '').replace(/\\.(?=\\d{3}(\\D|$))/g, '').replace(',', '.');\n}\nmonto = Number(monto);\nif (esMovimiento(tipo) && !(Number.isFinite(monto) && monto > 0)) tipo = 'INVALIDO';\nmonto = esMovimiento(tipo) ? Math.round(monto * 100) / 100 : 0;\n\nconst monedaCruda = String(d.moneda || '').toUpperCase();\nconst moneda = monedaCruda.includes('EUR') || monedaCruda.includes('€') ? 'EUR'\n  : monedaCruda.includes('USD') ? 'USD' : 'ARS';\nconst fecha = esFecha(d.fecha) ? d.fecha : origen.fecha_hoy;\nconst categoriaCruda = limpiarCategoria(d.categoria);\nconst categoria = CATEGORIAS.includes(categoriaCruda) ? categoriaCruda : 'Otros';\nconst descripcion = String(d.descripcion || '').trim();\nconst metodoPago = String(d.metodo_pago || '').trim() || 'No especificado';\n\nconst consultaTipo = String(d.consulta_tipo || '').toUpperCase().trim();\nconst consultaCategoria = limpiarCategoria(d.consulta_categoria);\nconst consulta = tipo === 'CONSULTA' ? {\n  desde: esFecha(d.consulta_desde) ? d.consulta_desde : origen.inicio_mes,\n  hasta: esFecha(d.consulta_hasta) ? d.consulta_hasta : origen.fecha_hoy,\n  tipo: ['GASTO', 'INGRESO', 'AMBOS'].includes(consultaTipo) ? consultaTipo : 'GASTO',\n  categoria: CATEGORIAS.includes(consultaCategoria) ? consultaCategoria : '',\n  titulo: String(d.consulta_titulo || '').trim() || 'el período',\n} : null;\n\nreturn {\n  json: {\n    fecha,\n    tipo,\n    monto,\n    moneda,\n    categoria,\n    descripcion,\n    metodo_pago: metodoPago,\n    notas: String(d.notas || '').trim(),\n    consulta,\n    chat_id: origen.chat_id,\n    texto_original: origen.texto,\n    error_parseo: errorParseo,\n    respuesta_cruda: crudo,\n  },\n};"
+      },
+      "id": "94c0e8b9-d73f-46b5-b152-72e7cee5042f",
+      "name": "Limpiar y parsear JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.tipo }}",
+              "rightValue": "GASTO",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.tipo }}",
+              "rightValue": "INGRESO",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "4ff8c8de-fb80-4c8e-b377-e3ab6ac67164",
+      "name": "¿Es GASTO o INGRESO?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1168,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $(\"Extraer datos del mensaje\").item.json.chat_id }}",
+        "text": "⚠️ Hola, no pude detectar un gasto o ingreso en tu mensaje. Por favor, escribime algo como: <i>'Gasté 5000 en verdulería con Mercado Pago'</i>\n\n📊 También podés preguntarme: <i>'¿cuánto gasté hoy?'</i>, <i>'gastos de la semana'</i>, <i>'balance del mes'</i> o <i>'cuánto llevo gastado este año'</i>.\n\n💳 Y tus saldos: <i>'¿cuánto tengo?'</i>.",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "8ae384d1-4c48-4356-a693-efb967e2b477",
+      "name": "Responder mensaje inválido",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1584,
+        368
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "webhookId": "91d77f91-d0cf-458c-bcec-71b391de9ac7",
+      "credentials": {
+        "telegramApi": {
+          "id": "TU_CREDENCIAL_TELEGRAM",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $(\"Extraer datos del mensaje\").item.json.chat_id }}",
+        "text": "❌ Hubo un problema técnico y no pude guardar tu registro. Probá de nuevo en unos minutos.",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "66685d7f-859e-4385-bca0-4ee6066159a4",
+      "name": "Avisar error al usuario",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1568,
+        176
+      ],
+      "webhookId": "6c74104b-857b-4e88-a5eb-a3db59d92c63",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "telegramApi": {
+          "id": "TU_CREDENCIAL_TELEGRAM",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Gastos e Ingresos por Telegram\n\nTelegram → Claude Haiku 5.5 decide si es un **movimiento** (se registra vía *Registrar movimiento*, con chequeo de duplicados y actualización de *Saldos*), una **consulta** (lee la hoja y responde totales por período, por moneda) o una pregunta de **saldos** (\"¿cuánto tengo?\": lee la pestaña *Saldos*).\n\n**Seguridad:** en *Telegram Trigger → Chat IDs* va solo tu chat ID.\n\nClaude usa los créditos de n8n; si se agotan, cargar una credencial Anthropic propia.",
+        "height": 260,
+        "width": 608,
+        "color": 4
+      },
+      "id": "22c86013-706f-4f24-a67a-a684fc7cddbc",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "each",
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "TU_ID_SUBWORKFLOW_REGISTRAR",
+          "cachedResultName": "Finanzas - Registrar movimiento (sub-workflow)"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fecha": "={{ $json.fecha }}",
+            "tipo": "={{ $json.tipo }}",
+            "monto": "={{ $json.monto }}",
+            "moneda": "={{ $json.moneda }}",
+            "categoria": "={{ $json.categoria }}",
+            "descripcion": "={{ $json.descripcion }}",
+            "metodo_pago": "={{ $json.metodo_pago }}",
+            "notas": "={{ $json.notas }}",
+            "origen": "Bot",
+            "chat_id": "={{ String($json.chat_id) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "fecha",
+              "displayName": "fecha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "monto",
+              "displayName": "monto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "moneda",
+              "displayName": "moneda",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "categoria",
+              "displayName": "categoria",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "descripcion",
+              "displayName": "descripcion",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "metodo_pago",
+              "displayName": "metodo_pago",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "notas",
+              "displayName": "notas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "origen",
+              "displayName": "origen",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "chat_id",
+              "displayName": "chat_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "name": "Registrar movimiento",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        1376,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.tipo }}",
+              "rightValue": "CONSULTA",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "¿Es consulta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1232,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "authentication": "oAuth2",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "TU_GOOGLE_SHEET_ID",
+          "cachedResultName": "Control de Finanzas"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Transacciones"
+        }
+      },
+      "name": "Leer movimientos",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1300,
+        560
+      ],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TU_CREDENCIAL_SHEETS",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Suma los movimientos de la hoja que caen en el período pedido, separados por moneda\n// (no se mezclan ARS, USD y EUR), y arma la respuesta para Telegram.\nconst q = $('Limpiar y parsear JSON').first().json;\nconst c = q.consulta;\n\nconst aDia = f => {\n  const m = String(f || '').match(/^(\\d{2})-(\\d{2})-(\\d{4})$/);\n  return m ? Date.UTC(+m[3], +m[2] - 1, +m[1]) / 86400000 : null;\n};\nconst esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst fmt = n => {\n  try { return Number(n).toLocaleString('es-AR', { maximumFractionDigits: 2 }); } catch (e) { return String(n); }\n};\n\nconst desde = aDia(c.desde);\nconst hasta = aDia(c.hasta);\nconst filas = $input.all().map(i => i.json).filter(f => f && f.Monto !== undefined && f.Monto !== '');\nconst dentro = filas.filter(f => {\n  const dia = aDia(f.Fecha);\n  if (dia === null || dia < desde || dia > hasta) return false;\n  if (c.tipo !== 'AMBOS' && f.Tipo !== c.tipo) return false;\n  if (c.categoria && f['Categoría'] !== c.categoria) return false;\n  return true;\n});\n\nconst sumar = tipo => {\n  const t = {};\n  dentro.filter(f => f.Tipo === tipo).forEach(f => {\n    const m = f.Moneda || 'ARS';\n    t[m] = (t[m] || 0) + (Number(f.Monto) || 0);\n  });\n  return t;\n};\nconst linea = t => Object.keys(t).length\n  ? Object.entries(t).map(([m, v]) => '$' + fmt(v) + ' ' + m).join(' · ')\n  : '$0';\n\nconst gastos = sumar('GASTO');\nconst ingresos = sumar('INGRESO');\nconst rango = c.desde === c.hasta ? c.desde : c.desde + ' al ' + c.hasta;\n\nlet msg = '📊 <b>Resumen — ' + esc(c.titulo) + '</b>\\n📅 ' + rango;\nif (c.categoria) msg += '\\n🏷️ ' + esc(c.categoria);\n\nif (!dentro.length) {\n  msg += '\\n\\nNo encontré movimientos en ese período.';\n} else {\n  msg += '\\n';\n  if (c.tipo !== 'INGRESO') msg += '\\n💸 <b>Gastos:</b> ' + linea(gastos);\n  if (c.tipo !== 'GASTO') msg += '\\n💰 <b>Ingresos:</b> ' + linea(ingresos);\n  if (c.tipo === 'AMBOS') {\n    const monedas = [...new Set([...Object.keys(gastos), ...Object.keys(ingresos)])];\n    msg += '\\n⚖️ <b>Balance:</b> ' + monedas\n      .map(m => '$' + fmt((ingresos[m] || 0) - (gastos[m] || 0)) + ' ' + m).join(' · ');\n  }\n\n  // Top 5 categorías de gasto por moneda\n  if (c.tipo !== 'INGRESO' && !c.categoria) {\n    Object.keys(gastos).forEach(m => {\n      const porCat = {};\n      dentro.filter(f => f.Tipo === 'GASTO' && (f.Moneda || 'ARS') === m).forEach(f => {\n        const k = f['Categoría'] || 'Otros';\n        porCat[k] = (porCat[k] || 0) + (Number(f.Monto) || 0);\n      });\n      const top = Object.entries(porCat).sort((a, b) => b[1] - a[1]).slice(0, 5);\n      msg += '\\n\\n🏷️ <b>Gastos por categoría (' + m + '):</b>\\n' +\n        top.map(([k, v]) => '• ' + esc(k) + ': $' + fmt(v)).join('\\n');\n    });\n  }\n\n  msg += '\\n\\n🧾 ' + dentro.length + (dentro.length === 1 ? ' movimiento' : ' movimientos');\n}\n\nreturn [{ json: { mensaje: msg, chat_id: q.chat_id } }];"
+      },
+      "name": "Calcular totales",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.mensaje }}",
+        "replyMarkup": "none",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "name": "Responder consulta",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1740,
+        560
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "telegramApi": {
+          "id": "TU_CREDENCIAL_TELEGRAM",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.tipo }}",
+              "rightValue": "SALDOS",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "¿Pregunta saldos?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1136,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "TU_GOOGLE_SHEET_ID",
+          "cachedResultName": "Control de Finanzas"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Saldos"
+        },
+        "options": {}
+      },
+      "name": "Leer saldos",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1312,
+        800
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TU_CREDENCIAL_SHEETS",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Arma la respuesta de \"¿cuánto tengo?\" con la pestaña Saldos: una fila por moneda\n// (ARS, USD, EUR), que nunca se suman entre sí.\nconst q = $('Limpiar y parsear JSON').first().json;\nconst filas = $input.all().map(i => i.json).filter(f => f && f.Moneda);\n\nconst dinero = (n, moneda) => (n < 0 ? '-$' : '$') +\n  Math.abs(n).toLocaleString('es-AR', { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 }) + ' ' + moneda;\nconst aNumero = v => typeof v === 'number' ? v\n  : Number(String(v || '').replace(/[^\\d,.-]/g, '').replace(/\\./g, '').replace(',', '.')) || 0;\n// Actualizado puede venir como texto DD-MM-YYYY o como número de serie de fecha de Sheets\nconst aDia = v => {\n  if (typeof v === 'number') return Math.floor(v) - 25569;\n  const m = String(v || '').match(/^(\\d{2})-(\\d{2})-(\\d{4})$/);\n  return m ? Date.UTC(+m[3], +m[2] - 1, +m[1]) / 86400000 : null;\n};\nconst diaATexto = d => {\n  const f = new Date(d * 86400000);\n  return String(f.getUTCDate()).padStart(2, '0') + '-' + String(f.getUTCMonth() + 1).padStart(2, '0') + '-' + f.getUTCFullYear();\n};\n\nif (!filas.length) {\n  return [{ json: { chat_id: q.chat_id, mensaje: '❌ No pude leer la pestaña Saldos. Probá de nuevo en unos minutos.' } }];\n}\n\nconst ETIQUETAS = { ARS: '🇦🇷 Pesos', USD: '🇺🇸 Dólares', EUR: '🇪🇺 Euros' };\nconst ORDEN = ['ARS', 'USD', 'EUR'];\nconst moneda = f => String(f.Moneda).trim().toUpperCase();\nconst ordenadas = filas.slice().sort((a, b) => {\n  const ia = ORDEN.indexOf(moneda(a)), ib = ORDEN.indexOf(moneda(b));\n  return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);\n});\n\nlet msg = '💳 <b>¿Cuánto tengo?</b>\\n\\n' + ordenadas\n  .map(f => '<b>' + (ETIQUETAS[moneda(f)] || moneda(f)) + ':</b> ' + dinero(aNumero(f.Saldo), moneda(f)))\n  .join('\\n');\n\nconst dias = filas.map(f => aDia(f.Actualizado)).filter(d => d !== null);\nif (dias.length) msg += '\\n\\n🕒 Última actualización: ' + diaATexto(Math.max(...dias));\n\nreturn [{ json: { chat_id: q.chat_id, mensaje: msg } }];\n"
+      },
+      "name": "Armar saldos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        800
+      ]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extraer datos del mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer datos del mensaje": {
+      "main": [
+        [
+          {
+            "node": "¿Tiene texto?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Tiene texto?": {
+      "main": [
+        [
+          {
+            "node": "Claude - Extraer transacción",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder mensaje inválido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude - Extraer transacción": {
+      "main": [
+        [
+          {
+            "node": "Limpiar y parsear JSON",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Avisar error al usuario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpiar y parsear JSON": {
+      "main": [
+        [
+          {
+            "node": "¿Pregunta saldos?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es GASTO o INGRESO?": {
+      "main": [
+        [
+          {
+            "node": "Registrar movimiento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder mensaje inválido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es consulta?": {
+      "main": [
+        [
+          {
+            "node": "Leer movimientos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Es GASTO o INGRESO?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer movimientos": {
+      "main": [
+        [
+          {
+            "node": "Calcular totales",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Avisar error al usuario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular totales": {
+      "main": [
+        [
+          {
+            "node": "Responder consulta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Pregunta saldos?": {
+      "main": [
+        [
+          {
+            "node": "Leer saldos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Es consulta?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer saldos": {
+      "main": [
+        [
+          {
+            "node": "Armar saldos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar saldos": {
+      "main": [
+        [
+          {
+            "node": "Responder consulta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

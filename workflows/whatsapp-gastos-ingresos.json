@@ -1,0 +1,238 @@
+{
+  "name": "WhatsApp - Registro de Gastos e Ingresos (Claude + Sheets)",
+  "nodes": [
+    {
+      "id": "d5f0f902-2bdf-45f6-a37f-68e9fd4f9ebc",
+      "name": "WhatsApp Trigger",
+      "type": "n8n-nodes-base.whatsAppTrigger",
+      "typeVersion": 1,
+      "position": [0, 300],
+      "parameters": { "updates": ["messages"] },
+      "webhookId": "989ecf24-bb81-4047-9531-97f0875ec5bc"
+    },
+    {
+      "id": "e298eb3a-49ca-4b7f-b0fc-4e5eaaa8034d",
+      "name": "Extraer datos del mensaje",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Extrae texto, remitente y datos de respuesta del payload de WhatsApp.\n// Ignora eventos de estado (sent/delivered/read), que no traen \"messages\".\n\n// Lista blanca opcional: números con código de país y sin '+', ej. '5493511234567'.\n// Vacía = acepta mensajes de cualquier número.\nconst NUMEROS_PERMITIDOS = [];\n\nconst fechaHoy = $now.setZone('America/Argentina/Cordoba').toFormat('dd-MM-yyyy');\nconst salida = [];\n\nfor (const item of $input.all()) {\n  const j = item.json;\n  const valores = Array.isArray(j.entry)\n    ? j.entry.flatMap(e => (e.changes || []).map(c => c.value || {}))\n    : [j];\n\n  for (const v of valores) {\n    const msg = v.messages && v.messages[0];\n    if (!msg) continue;\n\n    const remitente = String(msg.from || '');\n    if (NUMEROS_PERMITIDOS.length && !NUMEROS_PERMITIDOS.includes(remitente)) continue;\n\n    salida.push({\n      json: {\n        texto: msg.type === 'text' ? String((msg.text && msg.text.body) || '').trim() : '',\n        tipo_mensaje: msg.type || '',\n        remitente,\n        nombre: (v.contacts && v.contacts[0] && v.contacts[0].profile && v.contacts[0].profile.name) || '',\n        phone_number_id: (v.metadata && v.metadata.phone_number_id) || '',\n        message_id: msg.id || '',\n        fecha_hoy: fechaHoy,\n      },\n    });\n  }\n}\n\nreturn salida;"
+      }
+    },
+    {
+      "id": "8521981e-39ab-43ca-91c4-f3120a6afce6",
+      "name": "¿Tiene texto?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [440, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            { "leftValue": "={{ $json.texto }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty", "singleValue": true } }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "67c5fb57-fdac-4189-ad2a-d2fcac688657",
+      "name": "Claude - Extraer transacción",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [660, 200],
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": { "__rl": true, "mode": "id", "value": "claude-haiku-5-5" },
+        "messages": { "values": [{ "role": "user", "content": "={{ $json.texto }}" }] },
+        "simplify": true,
+        "options": {
+          "system": "=Eres un asistente experto en finanzas personales. Tu único objetivo es extraer la información de un mensaje de texto sobre gastos o ingresos enviado por WhatsApp y devolver un objeto JSON estricto.\n\nFECHA DE HOY (Sistema): {{ $json.fecha_hoy }}\n\nCATEGORÍAS PERMITIDAS (selecciona la más adecuada):\n- Alimentación / Supermercado\n- Salidas / Ocio\n- Servicios y Suscripciones\n- Salud y Deporte\n- Transporte / Vehículo\n- Indumentaria / Compras\n- Vivienda / Hogar\n- Educación / Cursos\n- Ingresos / Sueldo / Extras\n- Otros\n\nMÉTODOS DE PAGO HABITUALES:\n- Mercado Pago, Efectivo, Tarjeta de Crédito, Tarjeta de Débito, Transferencia.\n\nREGLAS DE PROCESAMIENTO:\n1. Si el usuario no especifica la moneda, asume por defecto 'ARS'.\n2. Si el mensaje indica entrada de dinero (cobro, sueldo, regalo, venta, etc.), el 'tipo' es 'INGRESO'. Si es un pago o compra, el 'tipo' es 'GASTO'.\n3. Excepción / Mensajes Inválidos: Si el mensaje del usuario no corresponde a un gasto, ingreso o transacción financiera (por ejemplo, un saludo como 'hola', una pregunta genérica o un texto sin relación), asigna estrictamente el valor \"INVALIDO\" al campo tipo y deja los demás campos en blanco o con una descripción aclaratoria.\n4. Si el mensaje menciona cuotas (ej. 'en 3 cuotas', '3/6'), colócalo explícitamente en el campo 'notas'.\n5. Utiliza la fecha de hoy provista por el sistema, salvo que el mensaje indique explícitamente otra fecha pasada o futura.\n6. Responde ÚNICAMENTE con un objeto JSON válido. No agregues texto introductorio, explicaciones ni bloques markdown adicionales.\n\nFORMATO DE SALIDA (JSON exacto):\n{\n  \"fecha\": \"DD-MM-YYYY\",\n  \"tipo\": \"GASTO\" | \"INGRESO\" | \"INVALIDO\",\n  \"monto\": number,\n  \"moneda\": \"ARS\" | \"USD\",\n  \"categoria\": \"string\",\n  \"descripcion\": \"string\",\n  \"metodo_pago\": \"string\",\n  \"notas\": \"string\"\n}",
+          "includeMergedResponse": true,
+          "maxTokens": 500
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "fd8b87c2-305f-4917-81c0-5c24d9732e94",
+      "name": "Limpiar y parsear JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 180],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "// Limpia la respuesta de Claude (bloques markdown, texto extra) y la parsea de forma segura.\n// Si algo no cierra, marca el registro como INVALIDO en vez de romper el flujo.\nconst origen = $('Extraer datos del mensaje').item.json;\nconst r = $json;\n\nlet crudo = '';\nif (typeof r.merged_response === 'string') crudo = r.merged_response;\nelse if (Array.isArray(r.content)) crudo = r.content.filter(c => c && c.type === 'text').map(c => c.text).join('\\n');\nelse if (typeof r.text === 'string') crudo = r.text;\nelse if (typeof r.output === 'string') crudo = r.output;\n\nlet limpio = String(crudo).replace(/```(?:json)?/gi, '').trim();\nconst ini = limpio.indexOf('{');\nconst fin = limpio.lastIndexOf('}');\nif (ini !== -1 && fin > ini) limpio = limpio.slice(ini, fin + 1);\n\nlet d = {};\nlet errorParseo = '';\ntry {\n  d = JSON.parse(limpio);\n  if (!d || typeof d !== 'object' || Array.isArray(d)) throw new Error('La respuesta no es un objeto JSON');\n} catch (e) {\n  d = {};\n  errorParseo = e.message;\n}\n\nconst CATEGORIAS = [\n  'Alimentación / Supermercado', 'Salidas / Ocio', 'Servicios y Suscripciones', 'Salud y Deporte',\n  'Transporte / Vehículo', 'Indumentaria / Compras', 'Vivienda / Hogar', 'Educación / Cursos',\n  'Ingresos / Sueldo / Extras', 'Otros',\n];\n\nconst tipoCrudo = String(d.tipo || '').toUpperCase().trim();\nlet tipo = ['GASTO', 'INGRESO'].includes(tipoCrudo) ? tipoCrudo : 'INVALIDO';\n\n// Acepta número o texto tipo \"15.000\", \"15.000,50\" o \"$ 2500\"\nlet monto = d.monto;\nif (typeof monto === 'string') {\n  monto = monto.replace(/[^\\d,.-]/g, '').replace(/\\.(?=\\d{3}(\\D|$))/g, '').replace(',', '.');\n}\nmonto = Number(monto);\nif (tipo !== 'INVALIDO' && !(Number.isFinite(monto) && monto > 0)) tipo = 'INVALIDO';\nmonto = tipo === 'INVALIDO' ? 0 : Math.round(monto * 100) / 100;\n\nconst moneda = String(d.moneda || '').toUpperCase().includes('USD') ? 'USD' : 'ARS';\nconst fecha = /^\\d{2}-\\d{2}-\\d{4}$/.test(String(d.fecha || '')) ? d.fecha : origen.fecha_hoy;\nconst categoria = CATEGORIAS.includes(d.categoria) ? d.categoria : 'Otros';\n\nlet montoTexto = String(monto);\ntry {\n  montoTexto = monto.toLocaleString('es-AR', { maximumFractionDigits: 2 });\n} catch (e) {}\n\nreturn {\n  json: {\n    fecha,\n    tipo,\n    monto,\n    moneda,\n    categoria,\n    descripcion: String(d.descripcion || '').trim(),\n    metodo_pago: String(d.metodo_pago || '').trim() || 'No especificado',\n    notas: String(d.notas || '').trim(),\n    monto_texto: montoTexto,\n    remitente: origen.remitente,\n    phone_number_id: origen.phone_number_id,\n    texto_original: origen.texto,\n    error_parseo: errorParseo,\n    respuesta_cruda: crudo,\n  },\n};"
+      }
+    },
+    {
+      "id": "0aee17ac-6b56-4b19-9173-20d9a950ea25",
+      "name": "¿Es GASTO o INGRESO?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [1100, 180],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            { "leftValue": "={{ $json.tipo }}", "rightValue": "GASTO", "operator": { "type": "string", "operation": "equals" } },
+            { "leftValue": "={{ $json.tipo }}", "rightValue": "INGRESO", "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "or"
+        }
+      }
+    },
+    {
+      "id": "ece510db-2f38-403b-a92e-95b7135aa615",
+      "name": "Guardar en Transacciones",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [1340, 80],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "append",
+        "authentication": "oAuth2",
+        "documentId": { "__rl": true, "mode": "id", "value": "TU_GOOGLE_SHEET_ID", "cachedResultName": "Control de Finanzas" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Transacciones" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "schema": [
+            { "id": "Fecha", "displayName": "Fecha", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Tipo", "displayName": "Tipo", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Monto", "displayName": "Monto", "required": false, "defaultMatch": false, "display": true, "type": "number", "canBeUsedToMatch": true },
+            { "id": "Moneda", "displayName": "Moneda", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Categoría", "displayName": "Categoría", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Descripción", "displayName": "Descripción", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Método de Pago", "displayName": "Método de Pago", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Notas", "displayName": "Notas", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ],
+          "value": {
+            "Fecha": "={{ $json.fecha }}",
+            "Tipo": "={{ $json.tipo }}",
+            "Monto": "={{ $json.monto }}",
+            "Moneda": "={{ $json.moneda }}",
+            "Categoría": "={{ $json.categoria }}",
+            "Descripción": "={{ $json.descripcion }}",
+            "Método de Pago": "={{ $json.metodo_pago }}",
+            "Notas": "={{ $json.notas }}"
+          }
+        },
+        "options": { "cellFormat": "RAW" }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "credentials": { "googleSheetsOAuth2Api": { "id": "TU_CREDENCIAL_SHEETS", "name": "Google Sheets" } }
+    },
+    {
+      "id": "6b596619-4b82-4bbd-9ccc-c24f1380f485",
+      "name": "Responder registro OK",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [1580, 60],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "phoneNumberId": "={{ $(\"Extraer datos del mensaje\").item.json.phone_number_id }}",
+        "recipientPhoneNumber": "={{ $(\"Extraer datos del mensaje\").item.json.remitente }}",
+        "messageType": "text",
+        "textBody": "=✅ ¡Registro guardado con éxito!\n\n📊 *Tipo:* {{ $(\"Limpiar y parsear JSON\").item.json.tipo }}\n💰 *Monto:* ${{ $(\"Limpiar y parsear JSON\").item.json.monto_texto }} {{ $(\"Limpiar y parsear JSON\").item.json.moneda }}\n🏷️ *Categoría:* {{ $(\"Limpiar y parsear JSON\").item.json.categoria }}\n💳 *Método:* {{ $(\"Limpiar y parsear JSON\").item.json.metodo_pago }}\n📝 *Detalle:* {{ $(\"Limpiar y parsear JSON\").item.json.descripcion }}",
+        "additionalFields": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "webhookId": "853ab58b-1246-4550-a7e3-4ac9606af1cf"
+    },
+    {
+      "id": "84817176-c004-4b99-864b-432051434264",
+      "name": "Responder mensaje inválido",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [1340, 300],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "phoneNumberId": "={{ $(\"Extraer datos del mensaje\").item.json.phone_number_id }}",
+        "recipientPhoneNumber": "={{ $(\"Extraer datos del mensaje\").item.json.remitente }}",
+        "messageType": "text",
+        "textBody": "⚠️ Hola, no pude detectar un gasto o ingreso en tu mensaje. Por favor, escribime algo como: *'Gasté 5000 en verdulería con Mercado Pago'*",
+        "additionalFields": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "webhookId": "58c40e6b-581e-49a0-8b96-3fa1f69bc2b4"
+    },
+    {
+      "id": "fc7bc1a4-9ce5-4599-b7d2-2c8766e4440f",
+      "name": "Avisar error al usuario",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [1580, 480],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "phoneNumberId": "={{ $(\"Extraer datos del mensaje\").item.json.phone_number_id }}",
+        "recipientPhoneNumber": "={{ $(\"Extraer datos del mensaje\").item.json.remitente }}",
+        "messageType": "text",
+        "textBody": "❌ Hubo un problema técnico y no pude guardar tu registro. Probá de nuevo en unos minutos.",
+        "additionalFields": {}
+      },
+      "onError": "continueRegularOutput",
+      "webhookId": "34e62eed-a19a-4ac1-9a1f-4231e7624f1b"
+    },
+    {
+      "id": "b64542c4-2e48-44d6-85ed-05804cf3699d",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-32, 208],
+      "parameters": {
+        "content": "## Gastos e Ingresos por WhatsApp\n\nWhatsApp → Claude Haiku 5.5 extrae la transacción → se guarda en **Control de Finanzas / Transacciones** → confirmación por WhatsApp.\n\n**Antes de activar:**\n1. Credencial *WhatsApp OAuth (Trigger)*: App ID + App Secret de Meta.\n2. Credencial *WhatsApp API*: Access Token + Business Account ID (en los 3 nodos de respuesta).\n3. Claude usa los créditos de n8n; si se agotan, cargar una credencial Anthropic propia.\n4. Opcional: `NUMEROS_PERMITIDOS` en *Extraer datos del mensaje* para aceptar solo tu número.",
+        "color": 4,
+        "width": 608,
+        "height": 224
+      }
+    }
+  ],
+  "connections": {
+    "WhatsApp Trigger": { "main": [[{ "node": "Extraer datos del mensaje", "type": "main", "index": 0 }]] },
+    "Extraer datos del mensaje": { "main": [[{ "node": "¿Tiene texto?", "type": "main", "index": 0 }]] },
+    "¿Tiene texto?": {
+      "main": [
+        [{ "node": "Claude - Extraer transacción", "type": "main", "index": 0 }],
+        [{ "node": "Responder mensaje inválido", "type": "main", "index": 0 }]
+      ]
+    },
+    "Claude - Extraer transacción": {
+      "main": [
+        [{ "node": "Limpiar y parsear JSON", "type": "main", "index": 0 }],
+        [{ "node": "Avisar error al usuario", "type": "main", "index": 0 }]
+      ]
+    },
+    "Limpiar y parsear JSON": { "main": [[{ "node": "¿Es GASTO o INGRESO?", "type": "main", "index": 0 }]] },
+    "¿Es GASTO o INGRESO?": {
+      "main": [
+        [{ "node": "Guardar en Transacciones", "type": "main", "index": 0 }],
+        [{ "node": "Responder mensaje inválido", "type": "main", "index": 0 }]
+      ]
+    },
+    "Guardar en Transacciones": {
+      "main": [
+        [{ "node": "Responder registro OK", "type": "main", "index": 0 }],
+        [{ "node": "Avisar error al usuario", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

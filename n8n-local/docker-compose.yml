@@ -1,0 +1,60 @@
+# n8n Community (gratis) en esta PC: http://localhost:5678
+# Secretos en .env (no compartir). Respaldar N8N_ENCRYPTION_KEY: sin ella se pierden las credenciales.
+#
+#   docker compose up -d      -> arrancar
+#   docker compose down       -> detener
+#   docker compose pull; docker compose up -d   -> actualizar
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:stable
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - N8N_SECURE_COOKIE=false
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - TZ=${GENERIC_TIMEZONE}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_PERSONALIZATION_ENABLED=false
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=true
+      - N8N_RUNNERS_ENABLED=true
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=336
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./files:/files
+
+  # WhatsApp HTTP API (WAHA Core, gratis). Dashboard: http://localhost:3000/dashboard
+  # Envía los mensajes entrantes al workflow "WhatsApp - Respuesta automática con IA".
+  waha:
+    image: devlikeapro/waha:latest
+    container_name: waha
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - WAHA_API_KEY=${WAHA_API_KEY}
+      - WAHA_DASHBOARD_USERNAME=admin
+      - WAHA_DASHBOARD_PASSWORD=${WAHA_DASHBOARD_PASSWORD}
+      - WHATSAPP_SWAGGER_USERNAME=admin
+      - WHATSAPP_SWAGGER_PASSWORD=${WAHA_DASHBOARD_PASSWORD}
+      - WHATSAPP_DEFAULT_ENGINE=WEBJS
+      - WHATSAPP_HOOK_URL=http://n8n:5678/webhook/whatsapp-auto-ia
+      - WHATSAPP_HOOK_EVENTS=message.any
+      - WAHA_LOG_LEVEL=info
+      - TZ=${GENERIC_TIMEZONE}
+    volumes:
+      - waha_sessions:/app/.sessions
+
+volumes:
+  n8n_data:
+    name: n8n_data
+  waha_sessions:
+    name: waha_sessions

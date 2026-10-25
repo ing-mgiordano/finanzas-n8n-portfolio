@@ -1,0 +1,11 @@
+# Secretos
+.env
+.mcp.json
+**/settings.local.json
+
+# Datos locales de n8n / WAHA
+n8n-local/files/
+
+# Exportaciones con datos reales
+*.xlsx
+*.csv
