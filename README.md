@@ -20,6 +20,14 @@ flowchart LR
     SH2 --> BOT
 ```
 
+## Capturas
+
+> Montos reales pixelados.
+
+| Bot de Telegram | Dashboard |
+|---|---|
+| <img src="docs/img/bot-telegram.jpg" alt="Bot de Telegram registrando un ingreso y respondiendo ¿cuánto tengo? con pesos, dólares, euros y cripto" width="300"> | <img src="docs/img/dashboard-resumen.png" alt="Dashboard: KPIs de saldo, ingresos, gastos, balance y tasa de ahorro, y curva de ingresos vs. gastos acumulados"><br><br><img src="docs/img/dashboard-detalle.png" alt="Dashboard: ingresos vs. gastos por mes, gastos por método de pago y por categoría"> |
+
 ## Qué hace
 
 | Workflow | Disparador | Qué resuelve |
