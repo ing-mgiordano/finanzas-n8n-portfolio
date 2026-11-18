@@ -10,15 +10,15 @@
           "chatIds": "TU_CHAT_ID_TELEGRAM"
         }
       },
-      "id": "4a5740b0-c54e-443c-8475-ce9eef624115",
+      "id": "2bdcffdf-4002-4bb7-9fb7-65244f255a58",
       "name": "Telegram Trigger",
       "type": "n8n-nodes-base.telegramTrigger",
       "typeVersion": 1.5,
       "position": [
-        32,
-        304
+        192,
+        368
       ],
-      "webhookId": "b599350b-d03a-4403-ad68-a759a41db881",
+      "webhookId": "9087f643-fda2-4469-82a3-0adc7d7b2e0b",
       "credentials": {
         "telegramApi": {
           "id": "TU_CREDENCIAL_TELEGRAM",
@@ -28,15 +28,15 @@
     },
     {
       "parameters": {
-        "jsCode": "// Extrae texto y chat del update de Telegram y calcula fechas de referencia en Córdoba\n// (hoy e inicio de semana/mes/año) para que Claude resuelva los períodos de las consultas.\n// Comandos (/start, /help) y mensajes sin texto (fotos, audios) salen con texto vacío\n// y reciben el mensaje de ayuda sin pasar por Claude.\nconst hoy = $now.setZone('America/Argentina/Cordoba');\nconst f = d => d.toFormat('dd-MM-yyyy');\nconst DIAS = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];\nconst TIPOS = ['photo', 'voice', 'audio', 'video', 'document', 'sticker', 'location', 'contact'];\n\nconst salida = [];\nfor (const item of $input.all()) {\n  const m = item.json.message;\n  if (!m || !m.chat) continue;\n\n  const textoCrudo = typeof m.text === 'string' ? m.text.trim() : '';\n  salida.push({\n    json: {\n      texto: textoCrudo.startsWith('/') ? '' : textoCrudo,\n      tipo_mensaje: textoCrudo ? 'text' : (TIPOS.find(t => m[t]) || 'otro'),\n      chat_id: m.chat.id,\n      nombre: (m.from && m.from.first_name) || '',\n      message_id: m.message_id,\n      fecha_hoy: f(hoy),\n      dia_semana: DIAS[hoy.weekday - 1],\n      inicio_semana: f(hoy.startOf('week')),\n      inicio_mes: f(hoy.startOf('month')),\n      inicio_anio: f(hoy.startOf('year')),\n    },\n  });\n}\n\nreturn salida;"
+        "jsCode": "// Extrae texto, foto y chat del update de Telegram y calcula fechas de referencia en Córdoba\n// (hoy e inicio de semana/mes/año) para que Claude resuelva los períodos de las consultas.\n// Comandos (/start, /help) y mensajes sin texto salen con texto vacío; las fotos llevan photo_file_id\n// (la de mayor resolución) para que Claude lea el ticket.\nconst hoy = $now.setZone('America/Argentina/Cordoba');\nconst f = d => d.toFormat('dd-MM-yyyy');\nconst DIAS = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];\nconst TIPOS = ['photo', 'voice', 'audio', 'video', 'document', 'sticker', 'location', 'contact'];\n\nconst salida = [];\nfor (const item of $input.all()) {\n  const m = item.json.message;\n  if (!m || !m.chat) continue;\n\n  const textoCrudo = typeof m.text === 'string' ? m.text.trim() : '';\n  const fotos = Array.isArray(m.photo) ? m.photo : [];\n  salida.push({\n    json: {\n      texto: textoCrudo.startsWith('/') ? '' : textoCrudo,\n      tipo_mensaje: textoCrudo ? 'text' : (TIPOS.find(t => m[t]) || 'otro'),\n      photo_file_id: fotos.length ? fotos[fotos.length - 1].file_id : '',\n      caption: typeof m.caption === 'string' ? m.caption.trim() : '',\n      chat_id: m.chat.id,\n      nombre: (m.from && m.from.first_name) || '',\n      message_id: m.message_id,\n      fecha_hoy: f(hoy),\n      dia_semana: DIAS[hoy.weekday - 1],\n      inicio_semana: f(hoy.startOf('week')),\n      inicio_mes: f(hoy.startOf('month')),\n      inicio_anio: f(hoy.startOf('year')),\n    },\n  });\n}\n\nreturn salida;"
       },
-      "id": "6a5ee9a0-199b-4e82-92ff-dd1d4a7e0f22",
+      "id": "47a27182-752f-4400-89cc-aa65489f007c",
       "name": "Extraer datos del mensaje",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        224,
-        304
+        384,
+        368
       ]
     },
     {
@@ -63,13 +63,13 @@
         },
         "options": {}
       },
-      "id": "c2d0646c-eafa-4557-8fe8-459866d14d11",
+      "id": "6e709ae3-16fc-4daf-bbf9-7313a5182344",
       "name": "¿Tiene texto?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        448,
-        304
+        608,
+        368
       ]
     },
     {
@@ -88,35 +88,69 @@
         },
         "options": {
           "includeMergedResponse": true,
-          "system": "=Eres un asistente experto en finanzas personales. Recibes un mensaje de chat que puede ser (a) un gasto o ingreso para registrar, (b) una consulta sobre totales de un período, o (c) una pregunta sobre cuánto dinero tiene disponible. Devuelve SIEMPRE un objeto JSON estricto.\n\nFECHA DE HOY (Sistema): {{ $json.fecha_hoy }} ({{ $json.dia_semana }})\nFECHAS DE REFERENCIA: esta semana empezó el {{ $json.inicio_semana }} (lunes); este mes empezó el {{ $json.inicio_mes }}; este año empezó el {{ $json.inicio_anio }}.\n\nCATEGORÍAS PERMITIDAS (selecciona la más adecuada):\n- Alimentación / Supermercado\n- Salidas / Ocio\n- Servicios y Suscripciones\n- Salud y Deporte (médicos, prepaga, estudios, gimnasio, deportes)\n- Farmacia (medicamentos y compras en farmacia)\n- Transporte / Vehículo\n- Indumentaria / Compras\n- Vivienda / Hogar\n- Educación / Cursos\n- Donaciones (donaciones, caridad, colectas, aportes a ONG)\n- Ingresos / Sueldo / Extras\n- Otros\n\nMÉTODOS DE PAGO HABITUALES:\n- Mercado Pago, Efectivo, Tarjeta de Crédito, Tarjeta de Débito, Transferencia, Revolut, Santander, Supervielle.\n- Si el mensaje nombra la entidad, inclúyela en metodo_pago (ej. 'Tarjeta de Débito Supervielle', 'Transferencia Mercado Pago', 'Tarjeta de Crédito Santander'). Si no dice cómo pagó, deja metodo_pago vacío.\n\nREGLAS DE PROCESAMIENTO:\n1. Moneda: si el mensaje menciona euros, € o EUR usa 'EUR'; si menciona dólares, USD, u$s o US$ usa 'USD'. Si no especifica la moneda, asume por defecto 'ARS'.\n2. Si el mensaje indica entrada de dinero (cobro, sueldo, regalo, venta, etc.), el 'tipo' es 'INGRESO'. Si es un pago o compra, el 'tipo' es 'GASTO'.\n3. Pago del resumen de una tarjeta de crédito (ej. 'pagué la Visa con Supervielle'): tipo 'GASTO', categoría 'Otros', en metodo_pago pon la cuenta con la que pagó (ej. 'Transferencia Supervielle', nunca 'Tarjeta de Crédito') y en notas 'Pago resumen'.\n4. SALDOS: si el mensaje pregunta cuánto dinero TIENE o le QUEDA disponible (ej. '¿cuánto tengo?', 'mis saldos', '¿cuántos dólares tengo?', '¿cuánto me queda en euros?', 'saldo'), usa tipo 'SALDOS', deja monto en 0 y los demás campos vacíos. No confundir con CONSULTA: SALDOS es el dinero disponible ahora; CONSULTA es cuánto gastó o cobró en un período.\n5. CONSULTAS: si el mensaje es una PREGUNTA o PEDIDO DE RESUMEN sobre cuánto gastó, cobró o lleva acumulado en un período (ej. '¿cuánto gasté hoy?', 'gastos de la semana', 'total del mes', 'cuánto llevo gastado este año', 'gastos en salidas de octubre', 'ingresos desde el 1/9', 'balance del mes'), usa tipo 'CONSULTA' y completa:\n   - consulta_desde y consulta_hasta (DD-MM-YYYY, ambos inclusive).\n   - consulta_tipo: 'GASTO' si pregunta por gastos (o no aclara); 'INGRESO' si pregunta por ingresos o cobros; 'AMBOS' si pide balance, resumen general o movimientos.\n   - consulta_categoria: exactamente una de las categorías permitidas si la menciona (solo el nombre, sin lo que está entre paréntesis); si no, ''.\n   - consulta_titulo: frase corta para el título (ej. 'hoy', 'esta semana', 'octubre 2026', 'en lo que va del año').\n   Períodos: 'hoy'/'diario' = hoy a hoy; 'ayer' = ayer a ayer; 'semana'/'semanal' = inicio de semana a hoy; 'mes'/'mensual' = inicio de mes a hoy; 'año'/'anual'/'en lo que va del año' = inicio de año a hoy; 'semana pasada'/'mes pasado'/'año pasado' = ese período calendario anterior completo; 'últimos N días' = desde hoy menos N-1 días hasta hoy; un mes nombrado (ej. 'septiembre') = ese mes completo del año actual, o del año anterior si todavía no llegó; 'desde X' = X a hoy. Si no indica período, usa el mes actual hasta hoy.\n   En una CONSULTA deja monto en 0 y los campos del movimiento vacíos.\n6. Excepción / Mensajes Inválidos: si el mensaje no es un gasto, un ingreso, una consulta de totales ni una pregunta de saldos (por ejemplo, un saludo como 'hola' o un texto sin relación), asigna estrictamente el valor \"INVALIDO\" al campo tipo y deja los demás campos en blanco o con una descripción aclaratoria.\n7. Si el mensaje menciona cuotas (ej. 'en 3 cuotas', '3/6'), colócalo explícitamente en el campo 'notas'.\n8. Para gastos e ingresos utiliza la fecha de hoy provista por el sistema, salvo que el mensaje indique explícitamente otra fecha pasada o futura.\n9. El campo 'categoria' lleva solo el nombre de la categoría, sin lo que está entre paréntesis.\n10. Responde ÚNICAMENTE con un objeto JSON válido. No agregues texto introductorio, explicaciones ni bloques markdown adicionales.\n\nFORMATO DE SALIDA (JSON exacto):\n{\n  \"fecha\": \"DD-MM-YYYY\",\n  \"tipo\": \"GASTO\" | \"INGRESO\" | \"CONSULTA\" | \"SALDOS\" | \"INVALIDO\",\n  \"monto\": number,\n  \"moneda\": \"ARS\" | \"USD\" | \"EUR\",\n  \"categoria\": \"string\",\n  \"descripcion\": \"string\",\n  \"metodo_pago\": \"string\",\n  \"notas\": \"string\",\n  \"consulta_desde\": \"DD-MM-YYYY\",\n  \"consulta_hasta\": \"DD-MM-YYYY\",\n  \"consulta_tipo\": \"GASTO\" | \"INGRESO\" | \"AMBOS\",\n  \"consulta_categoria\": \"string\",\n  \"consulta_titulo\": \"string\"\n}",
+          "system": "=Eres un asistente experto en finanzas personales. Recibes un mensaje de chat que puede ser (a) un gasto o ingreso para registrar, (b) una consulta sobre totales de un período, (c) una pregunta sobre cuánto dinero tiene disponible, (d) un pedido para corregir el saldo total de una moneda, (e) una pregunta por su patrimonio total, (f) una pregunta sobre si puede permitirse un gasto o (g) un pedido para fijar el presupuesto mensual de una categoría. Devuelve SIEMPRE un objeto JSON estricto.\n\nFECHA DE HOY (Sistema): {{ $json.fecha_hoy }} ({{ $json.dia_semana }})\nFECHAS DE REFERENCIA: esta semana empezó el {{ $json.inicio_semana }} (lunes); este mes empezó el {{ $json.inicio_mes }}; este año empezó el {{ $json.inicio_anio }}.\n\nCATEGORÍAS PERMITIDAS (selecciona la más adecuada):\n- Alimentación / Supermercado\n- Salidas / Ocio\n- Servicios y Suscripciones\n- Salud y Deporte (médicos, prepaga, estudios, gimnasio, deportes)\n- Farmacia (medicamentos y compras en farmacia)\n- Transporte / Vehículo\n- Indumentaria / Compras\n- Vivienda / Hogar\n- Educación / Cursos\n- Donaciones (donaciones, caridad, colectas, aportes a ONG)\n- Ingresos / Sueldo / Extras\n- Otros\n\nMÉTODOS DE PAGO HABITUALES:\n- Mercado Pago, Efectivo, Tarjeta de Crédito, Tarjeta de Débito, Transferencia, Revolut, Santander, Supervielle.\n- Si el mensaje nombra la entidad, inclúyela en metodo_pago (ej. 'Tarjeta de Débito Supervielle', 'Transferencia Mercado Pago', 'Tarjeta de Crédito Santander'). Si no dice cómo pagó, deja metodo_pago vacío.\n\nREGLAS DE PROCESAMIENTO:\n1. Moneda: si el mensaje menciona euros, € o EUR usa 'EUR'; si menciona dólares, USD, u$s o US$ usa 'USD'. Si no especifica la moneda, asume por defecto 'ARS'.\n2. Si el mensaje indica entrada de dinero (cobro, sueldo, regalo, venta, etc.), el 'tipo' es 'INGRESO'. Si es un pago o compra ya realizado, el 'tipo' es 'GASTO'.\n3. Pago del resumen de una tarjeta de crédito (ej. 'pagué la Visa con Supervielle'): tipo 'GASTO', categoría 'Otros', en metodo_pago pon la cuenta con la que pagó (ej. 'Transferencia Supervielle', nunca 'Tarjeta de Crédito') y en notas 'Pago resumen'.\n4. SALDOS: si el mensaje pregunta cuánto dinero TIENE o le QUEDA disponible por moneda (ej. '¿cuánto tengo?', 'mis saldos', '¿cuántos dólares tengo?', '¿cuánto me queda en euros?', 'saldo'), usa tipo 'SALDOS', deja monto en 0 y los demás campos vacíos. No confundir con CONSULTA: SALDOS es el dinero disponible ahora; CONSULTA es cuánto gastó o cobró en un período.\n5. AJUSTE DE SALDO: si el mensaje pide CORREGIR, AJUSTAR, MODIFICAR, ACTUALIZAR o FIJAR el saldo total disponible de una moneda (ej. 'ajustá el saldo en pesos a 850000', 'corregí los dólares, tengo 1200', 'poné el saldo en euros en 340,50', 'mi saldo real en pesos es 500000', 'modificá el total de dólares a 2000'), usa tipo 'AJUSTE', pon en monto el NUEVO SALDO TOTAL (nunca la diferencia) y en moneda la moneda indicada; deja los demás campos vacíos. No confundir con GASTO/INGRESO (un movimiento puntual) ni con SALDOS (una pregunta).\n6. PATRIMONIO: si pregunta por su patrimonio, cuánto vale o cuánto tiene EN TOTAL todo junto convertido a una moneda (ej. '¿cuánto valgo?', 'mi patrimonio', '¿cuánto tengo en total en dólares?', 'todo junto'), usa tipo 'PATRIMONIO', monto 0 y los demás campos vacíos. No confundir con SALDOS (saldos separados por moneda).\n7. PERMITIR: si pregunta si PUEDE, le ALCANZA o le CONVIENE gastar o comprar algo que todavía no compró (ej. '¿puedo gastar 80000 en zapatillas?', '¿me alcanza para un viaje de 500 dólares?', '¿me compro una tele de 600000?'), usa tipo 'PERMITIR' con monto, moneda, categoria (la que correspondería a ese gasto) y descripcion (qué quiere comprar). Nunca lo registres como GASTO.\n8. PRESUPUESTO: si pide fijar, cambiar o borrar el presupuesto mensual (tope de gasto) de una categoría (ej. 'presupuesto de salidas 100000', 'quiero gastar como máximo 50000 por mes en ropa', 'sacá el presupuesto de farmacia'), usa tipo 'PRESUPUESTO' con categoria, monto (el monto mensual; 0 si pide borrarlo) y moneda.\n9. CONSULTAS: si el mensaje es una PREGUNTA o PEDIDO DE RESUMEN sobre cuánto gastó, cobró o lleva acumulado en un período (ej. '¿cuánto gasté hoy?', 'gastos de la semana', 'total del mes', 'cuánto llevo gastado este año', 'gastos en salidas de octubre', 'ingresos desde el 1/9', 'balance del mes'), usa tipo 'CONSULTA' y completa:\n   - consulta_desde y consulta_hasta (DD-MM-YYYY, ambos inclusive).\n   - consulta_tipo: 'GASTO' si pregunta por gastos (o no aclara); 'INGRESO' si pregunta por ingresos o cobros; 'AMBOS' si pide balance, resumen general o movimientos.\n   - consulta_categoria: exactamente una de las categorías permitidas si la menciona (solo el nombre, sin lo que está entre paréntesis); si no, ''.\n   - consulta_titulo: frase corta para el título (ej. 'hoy', 'esta semana', 'octubre 2026', 'en lo que va del año').\n   Períodos: 'hoy'/'diario' = hoy a hoy; 'ayer' = ayer a ayer; 'semana'/'semanal' = inicio de semana a hoy; 'mes'/'mensual' = inicio de mes a hoy; 'año'/'anual'/'en lo que va del año' = inicio de año a hoy; 'semana pasada'/'mes pasado'/'año pasado' = ese período calendario anterior completo; 'últimos N días' = desde hoy menos N-1 días hasta hoy; un mes nombrado (ej. 'septiembre') = ese mes completo del año actual, o del año anterior si todavía no llegó; 'desde X' = X a hoy. Si no indica período, usa el mes actual hasta hoy.\n   En una CONSULTA deja monto en 0 y los campos del movimiento vacíos.\n10. Excepción / Mensajes Inválidos: si el mensaje no encaja en ninguno de los casos anteriores (por ejemplo, un saludo como 'hola' o un texto sin relación), asigna estrictamente el valor \"INVALIDO\" al campo tipo y deja los demás campos en blanco o con una descripción aclaratoria.\n11. Si el mensaje menciona cuotas (ej. 'en 3 cuotas', '3/6'), colócalo explícitamente en el campo 'notas'.\n12. Para gastos e ingresos utiliza la fecha de hoy provista por el sistema, salvo que el mensaje indique explícitamente otra fecha pasada o futura.\n13. El campo 'categoria' lleva solo el nombre de la categoría, sin lo que está entre paréntesis.\n14. Responde ÚNICAMENTE con un objeto JSON válido. No agregues texto introductorio, explicaciones ni bloques markdown adicionales.\n\nFORMATO DE SALIDA (JSON exacto):\n{\n  \"fecha\": \"DD-MM-YYYY\",\n  \"tipo\": \"GASTO\" | \"INGRESO\" | \"CONSULTA\" | \"SALDOS\" | \"AJUSTE\" | \"PATRIMONIO\" | \"PERMITIR\" | \"PRESUPUESTO\" | \"INVALIDO\",\n  \"monto\": number,\n  \"moneda\": \"ARS\" | \"USD\" | \"EUR\",\n  \"categoria\": \"string\",\n  \"descripcion\": \"string\",\n  \"metodo_pago\": \"string\",\n  \"notas\": \"string\",\n  \"consulta_desde\": \"DD-MM-YYYY\",\n  \"consulta_hasta\": \"DD-MM-YYYY\",\n  \"consulta_tipo\": \"GASTO\" | \"INGRESO\" | \"AMBOS\",\n  \"consulta_categoria\": \"string\",\n  \"consulta_titulo\": \"string\"\n}",
           "maxTokens": 500
         }
       },
-      "id": "efa08c62-61fa-484c-bde8-b50cb4a8eb6e",
+      "id": "df1c6dc3-7ccb-4106-a87d-2633251a2d1c",
       "name": "Claude - Extraer transacción",
       "type": "@n8n/n8n-nodes-langchain.anthropic",
       "typeVersion": 1,
       "position": [
-        576,
-        160
+        736,
+        224
       ],
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
-      "onError": "continueErrorOutput"
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "anthropicApi": {
+          "id": "TU_CREDENCIAL_ANTHROPIC",
+          "name": "Anthropic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $(\"Extraer datos del mensaje\").item.json.chat_id }}",
+        "text": "⚠️ Hola, no pude detectar un gasto o ingreso en tu mensaje. Escribime algo como <i>'Gasté 5000 en verdulería con Mercado Pago'</i> o mandame la <b>foto del ticket</b>.\n\n📊 Consultas: <i>'¿cuánto gasté hoy?'</i>, <i>'balance del mes'</i>\n💳 Saldos: <i>'¿cuánto tengo?'</i> · 💼 Patrimonio: <i>'¿cuánto valgo?'</i>\n🤔 <i>'¿Puedo gastar 80000 en zapatillas?'</i>\n🎯 Presupuestos: <i>'presupuesto de salidas 100000'</i>\n🔧 Ajustes: <i>'ajustá el saldo en pesos a 850000'</i>",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "aac8d92b-d044-4ea7-b4a9-686633e9b903",
+      "name": "Responder mensaje inválido",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1808,
+        432
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "webhookId": "b685a41b-f59c-4e03-a284-78753085faaa",
+      "credentials": {
+        "telegramApi": {
+          "id": "TU_CREDENCIAL_TELEGRAM",
+          "name": "Telegram account"
+        }
+      }
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Limpia la respuesta de Claude (bloques markdown, texto extra) y la parsea de forma segura.\n// Si algo no cierra, marca el mensaje como INVALIDO en vez de romper el flujo.\nconst origen = $('Extraer datos del mensaje').item.json;\nconst r = $json;\n\nlet crudo = '';\nif (typeof r.merged_response === 'string') crudo = r.merged_response;\nelse if (Array.isArray(r.content)) crudo = r.content.filter(c => c && c.type === 'text').map(c => c.text).join('\\n');\nelse if (typeof r.text === 'string') crudo = r.text;\nelse if (typeof r.output === 'string') crudo = r.output;\n\nlet limpio = String(crudo).replace(/```(?:json)?/gi, '').trim();\nconst ini = limpio.indexOf('{');\nconst fin = limpio.lastIndexOf('}');\nif (ini !== -1 && fin > ini) limpio = limpio.slice(ini, fin + 1);\n\nlet d = {};\nlet errorParseo = '';\ntry {\n  d = JSON.parse(limpio);\n  if (!d || typeof d !== 'object' || Array.isArray(d)) throw new Error('La respuesta no es un objeto JSON');\n} catch (e) {\n  d = {};\n  errorParseo = e.message;\n}\n\nconst CATEGORIAS = [\n  'Alimentación / Supermercado', 'Salidas / Ocio', 'Servicios y Suscripciones', 'Salud y Deporte',\n  'Farmacia', 'Transporte / Vehículo', 'Indumentaria / Compras', 'Vivienda / Hogar', 'Educación / Cursos',\n  'Donaciones', 'Ingresos / Sueldo / Extras', 'Otros',\n];\n// Por si Claude devuelve la categoría con la aclaración entre paréntesis\nconst limpiarCategoria = s => String(s || '').replace(/s*(.*)s*$/, '').trim();\nconst esFecha = s => /^\\d{2}-\\d{2}-\\d{4}$/.test(String(s || ''));\n\nconst tipoCrudo = String(d.tipo || '').toUpperCase().trim();\nlet tipo = ['GASTO', 'INGRESO', 'CONSULTA', 'SALDOS'].includes(tipoCrudo) ? tipoCrudo : 'INVALIDO';\nconst esMovimiento = t => t === 'GASTO' || t === 'INGRESO';\n\n// Acepta número o texto tipo \"15.000\", \"15.000,50\" o \"$ 2500\"\nlet monto = d.monto;\nif (typeof monto === 'string') {\n  monto = monto.replace(/[^\\d,.-]/g, '').replace(/\\.(?=\\d{3}(\\D|$))/g, '').replace(',', '.');\n}\nmonto = Number(monto);\nif (esMovimiento(tipo) && !(Number.isFinite(monto) && monto > 0)) tipo = 'INVALIDO';\nmonto = esMovimiento(tipo) ? Math.round(monto * 100) / 100 : 0;\n\nconst monedaCruda = String(d.moneda || '').toUpperCase();\nconst moneda = monedaCruda.includes('EUR') || monedaCruda.includes('€') ? 'EUR'\n  : monedaCruda.includes('USD') ? 'USD' : 'ARS';\nconst fecha = esFecha(d.fecha) ? d.fecha : origen.fecha_hoy;\nconst categoriaCruda = limpiarCategoria(d.categoria);\nconst categoria = CATEGORIAS.includes(categoriaCruda) ? categoriaCruda : 'Otros';\nconst descripcion = String(d.descripcion || '').trim();\nconst metodoPago = String(d.metodo_pago || '').trim() || 'No especificado';\n\nconst consultaTipo = String(d.consulta_tipo || '').toUpperCase().trim();\nconst consultaCategoria = limpiarCategoria(d.consulta_categoria);\nconst consulta = tipo === 'CONSULTA' ? {\n  desde: esFecha(d.consulta_desde) ? d.consulta_desde : origen.inicio_mes,\n  hasta: esFecha(d.consulta_hasta) ? d.consulta_hasta : origen.fecha_hoy,\n  tipo: ['GASTO', 'INGRESO', 'AMBOS'].includes(consultaTipo) ? consultaTipo : 'GASTO',\n  categoria: CATEGORIAS.includes(consultaCategoria) ? consultaCategoria : '',\n  titulo: String(d.consulta_titulo || '').trim() || 'el período',\n} : null;\n\nreturn {\n  json: {\n    fecha,\n    tipo,\n    monto,\n    moneda,\n    categoria,\n    descripcion,\n    metodo_pago: metodoPago,\n    notas: String(d.notas || '').trim(),\n    consulta,\n    chat_id: origen.chat_id,\n    texto_original: origen.texto,\n    error_parseo: errorParseo,\n    respuesta_cruda: crudo,\n  },\n};"
+        "jsCode": "// Limpia la respuesta de Claude (bloques markdown, texto extra) y la parsea de forma segura.\n// Si algo no cierra, marca el mensaje como INVALIDO en vez de romper el flujo.\nconst origen = $('Extraer datos del mensaje').item.json;\nconst r = $json;\n\nlet crudo = '';\nif (typeof r.merged_response === 'string') crudo = r.merged_response;\nelse if (Array.isArray(r.content)) crudo = r.content.filter(c => c && c.type === 'text').map(c => c.text).join('\\n');\nelse if (typeof r.content === 'string') crudo = r.content;\nelse if (typeof r.text === 'string') crudo = r.text;\nelse if (typeof r.output === 'string') crudo = r.output;\n\nlet limpio = String(crudo).replace(/```(?:json)?/gi, '').trim();\nconst ini = limpio.indexOf('{');\nconst fin = limpio.lastIndexOf('}');\nif (ini !== -1 && fin > ini) limpio = limpio.slice(ini, fin + 1);\n\nlet d = {};\nlet errorParseo = '';\ntry {\n  d = JSON.parse(limpio);\n  if (!d || typeof d !== 'object' || Array.isArray(d)) throw new Error('La respuesta no es un objeto JSON');\n} catch (e) {\n  d = {};\n  errorParseo = e.message;\n}\n\nconst CATEGORIAS = [\n  'Alimentación / Supermercado', 'Salidas / Ocio', 'Servicios y Suscripciones', 'Salud y Deporte',\n  'Farmacia', 'Transporte / Vehículo', 'Indumentaria / Compras', 'Vivienda / Hogar', 'Educación / Cursos',\n  'Donaciones', 'Ingresos / Sueldo / Extras', 'Otros',\n];\n// Por si Claude devuelve la categoría con la aclaración entre paréntesis\nconst limpiarCategoria = s => String(s || '').replace(/\\s*\\(.*\\)\\s*$/, '').trim();\nconst esFecha = s => /^\\d{2}-\\d{2}-\\d{4}$/.test(String(s || ''));\n\nconst tipoCrudo = String(d.tipo || '').toUpperCase().trim();\nlet tipo = ['GASTO', 'INGRESO', 'CONSULTA', 'SALDOS', 'AJUSTE', 'PATRIMONIO', 'PERMITIR', 'PRESUPUESTO'].includes(tipoCrudo) ? tipoCrudo : 'INVALIDO';\nconst esMovimiento = t => t === 'GASTO' || t === 'INGRESO';\n// Tipos que necesitan un monto: movimientos y \"¿puedo gastar?\" mayor a 0; ajuste y presupuesto pueden ser 0\nconst conMontoPositivo = t => esMovimiento(t) || t === 'PERMITIR';\nconst conMontoCero = t => t === 'AJUSTE' || t === 'PRESUPUESTO';\n\n// Acepta número o texto tipo \"15.000\", \"15.000,50\" o \"$ 2500\"\nlet monto = d.monto;\nif (typeof monto === 'string') {\n  monto = monto.replace(/[^\\d,.-]/g, '').replace(/\\.(?=\\d{3}(\\D|$))/g, '').replace(',', '.');\n}\nmonto = Number(monto);\nif (conMontoPositivo(tipo) && !(Number.isFinite(monto) && monto > 0)) tipo = 'INVALIDO';\nif (conMontoCero(tipo) && !(Number.isFinite(monto) && monto >= 0 && d.monto !== '' && d.monto != null)) tipo = 'INVALIDO';\nmonto = conMontoPositivo(tipo) || conMontoCero(tipo) ? Math.round(monto * 100) / 100 : 0;\n\nconst monedaCruda = String(d.moneda || '').toUpperCase();\nconst moneda = monedaCruda.includes('EUR') || monedaCruda.includes('€') ? 'EUR'\n  : monedaCruda.includes('USD') ? 'USD' : 'ARS';\nconst fecha = esFecha(d.fecha) ? d.fecha : origen.fecha_hoy;\nconst categoriaCruda = limpiarCategoria(d.categoria);\nconst categoria = CATEGORIAS.includes(categoriaCruda) ? categoriaCruda : 'Otros';\nconst descripcion = String(d.descripcion || '').trim();\nconst metodoPago = String(d.metodo_pago || '').trim() || 'No especificado';\n\nconst consultaTipo = String(d.consulta_tipo || '').toUpperCase().trim();\nconst consultaCategoria = limpiarCategoria(d.consulta_categoria);\nconst consulta = tipo === 'CONSULTA' ? {\n  desde: esFecha(d.consulta_desde) ? d.consulta_desde : origen.inicio_mes,\n  hasta: esFecha(d.consulta_hasta) ? d.consulta_hasta : origen.fecha_hoy,\n  tipo: ['GASTO', 'INGRESO', 'AMBOS'].includes(consultaTipo) ? consultaTipo : 'GASTO',\n  categoria: CATEGORIAS.includes(consultaCategoria) ? consultaCategoria : '',\n  titulo: String(d.consulta_titulo || '').trim() || 'el período',\n} : null;\n\nreturn {\n  json: {\n    fecha,\n    tipo,\n    monto,\n    moneda,\n    categoria,\n    descripcion,\n    metodo_pago: metodoPago,\n    notas: String(d.notas || '').trim(),\n    consulta,\n    chat_id: origen.chat_id,\n    texto_original: origen.texto || origen.caption,\n    error_parseo: errorParseo,\n    respuesta_cruda: crudo,\n  },\n};"
       },
-      "id": "94c0e8b9-d73f-46b5-b152-72e7cee5042f",
+      "id": "99cdd485-5f31-4f1f-965a-eff66e69eea5",
       "name": "Limpiar y parsear JSON",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        960,
-        0
+        1120,
+        64
       ]
     },
     {
@@ -150,42 +184,14 @@
         },
         "options": {}
       },
-      "id": "4ff8c8de-fb80-4c8e-b377-e3ab6ac67164",
+      "id": "dbb9fbcc-7475-46ee-92d1-e272048d86e6",
       "name": "¿Es GASTO o INGRESO?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        1168,
-        0
+        1504,
+        16
       ]
-    },
-    {
-      "parameters": {
-        "chatId": "={{ $(\"Extraer datos del mensaje\").item.json.chat_id }}",
-        "text": "⚠️ Hola, no pude detectar un gasto o ingreso en tu mensaje. Por favor, escribime algo como: <i>'Gasté 5000 en verdulería con Mercado Pago'</i>\n\n📊 También podés preguntarme: <i>'¿cuánto gasté hoy?'</i>, <i>'gastos de la semana'</i>, <i>'balance del mes'</i> o <i>'cuánto llevo gastado este año'</i>.\n\n💳 Y tus saldos: <i>'¿cuánto tengo?'</i>.",
-        "additionalFields": {
-          "appendAttribution": false,
-          "parse_mode": "HTML"
-        }
-      },
-      "id": "8ae384d1-4c48-4356-a693-efb967e2b477",
-      "name": "Responder mensaje inválido",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1.2,
-      "position": [
-        1584,
-        368
-      ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000,
-      "webhookId": "91d77f91-d0cf-458c-bcec-71b391de9ac7",
-      "credentials": {
-        "telegramApi": {
-          "id": "TU_CREDENCIAL_TELEGRAM",
-          "name": "Telegram account"
-        }
-      }
     },
     {
       "parameters": {
@@ -196,15 +202,15 @@
           "parse_mode": "HTML"
         }
       },
-      "id": "66685d7f-859e-4385-bca0-4ee6066159a4",
+      "id": "f41dc985-5f0f-4ab8-9852-da17ddd4ad63",
       "name": "Avisar error al usuario",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1568,
-        176
+        1792,
+        224
       ],
-      "webhookId": "6c74104b-857b-4e88-a5eb-a3db59d92c63",
+      "webhookId": "2c6e527e-71b0-4d25-b5e8-346dd743ef6e",
       "onError": "continueRegularOutput",
       "credentials": {
         "telegramApi": {
@@ -220,19 +226,17 @@
         "width": 608,
         "color": 4
       },
-      "id": "22c86013-706f-4f24-a67a-a684fc7cddbc",
-      "name": "Sticky Note",
+      "id": "1aeef66a-df2f-4e31-abdb-f66009b54630",
+      "name": "Sticky Note 9fcebe3a",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -160,
-        -64
+        0,
+        0
       ]
     },
     {
       "parameters": {
-        "mode": "each",
-        "source": "database",
         "workflowId": {
           "__rl": true,
           "mode": "id",
@@ -348,16 +352,18 @@
           ],
           "attemptToConvertTypes": false
         },
+        "mode": "each",
         "options": {
           "waitForSubWorkflow": false
         }
       },
+      "id": "0edfa9cf-0c69-4b3b-827c-0a64e0998c6f",
       "name": "Registrar movimiento",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.4,
       "position": [
-        1376,
-        -16
+        1744,
+        16
       ]
     },
     {
@@ -383,19 +389,17 @@
         },
         "options": {}
       },
+      "id": "f1bee935-ac64-4ce8-9790-1ed545c64b3c",
       "name": "¿Es consulta?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        1232,
-        176
+        1392,
+        240
       ]
     },
     {
       "parameters": {
-        "resource": "sheet",
-        "operation": "read",
-        "authentication": "oAuth2",
         "documentId": {
           "__rl": true,
           "mode": "id",
@@ -406,21 +410,23 @@
           "__rl": true,
           "mode": "name",
           "value": "Transacciones"
-        }
+        },
+        "options": {}
       },
+      "id": "f34c5e66-56b0-4ce3-874b-091e1b35f171",
       "name": "Leer movimientos",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        1300,
-        560
+        1472,
+        528
       ],
-      "onError": "continueErrorOutput",
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
       "alwaysOutputData": true,
       "executeOnce": true,
+      "onError": "continueErrorOutput",
       "credentials": {
         "googleSheetsOAuth2Api": {
           "id": "TU_CREDENCIAL_SHEETS",
@@ -430,37 +436,35 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
-        "jsCode": "// Suma los movimientos de la hoja que caen en el período pedido, separados por moneda\n// (no se mezclan ARS, USD y EUR), y arma la respuesta para Telegram.\nconst q = $('Limpiar y parsear JSON').first().json;\nconst c = q.consulta;\n\nconst aDia = f => {\n  const m = String(f || '').match(/^(\\d{2})-(\\d{2})-(\\d{4})$/);\n  return m ? Date.UTC(+m[3], +m[2] - 1, +m[1]) / 86400000 : null;\n};\nconst esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst fmt = n => {\n  try { return Number(n).toLocaleString('es-AR', { maximumFractionDigits: 2 }); } catch (e) { return String(n); }\n};\n\nconst desde = aDia(c.desde);\nconst hasta = aDia(c.hasta);\nconst filas = $input.all().map(i => i.json).filter(f => f && f.Monto !== undefined && f.Monto !== '');\nconst dentro = filas.filter(f => {\n  const dia = aDia(f.Fecha);\n  if (dia === null || dia < desde || dia > hasta) return false;\n  if (c.tipo !== 'AMBOS' && f.Tipo !== c.tipo) return false;\n  if (c.categoria && f['Categoría'] !== c.categoria) return false;\n  return true;\n});\n\nconst sumar = tipo => {\n  const t = {};\n  dentro.filter(f => f.Tipo === tipo).forEach(f => {\n    const m = f.Moneda || 'ARS';\n    t[m] = (t[m] || 0) + (Number(f.Monto) || 0);\n  });\n  return t;\n};\nconst linea = t => Object.keys(t).length\n  ? Object.entries(t).map(([m, v]) => '$' + fmt(v) + ' ' + m).join(' · ')\n  : '$0';\n\nconst gastos = sumar('GASTO');\nconst ingresos = sumar('INGRESO');\nconst rango = c.desde === c.hasta ? c.desde : c.desde + ' al ' + c.hasta;\n\nlet msg = '📊 <b>Resumen — ' + esc(c.titulo) + '</b>\\n📅 ' + rango;\nif (c.categoria) msg += '\\n🏷️ ' + esc(c.categoria);\n\nif (!dentro.length) {\n  msg += '\\n\\nNo encontré movimientos en ese período.';\n} else {\n  msg += '\\n';\n  if (c.tipo !== 'INGRESO') msg += '\\n💸 <b>Gastos:</b> ' + linea(gastos);\n  if (c.tipo !== 'GASTO') msg += '\\n💰 <b>Ingresos:</b> ' + linea(ingresos);\n  if (c.tipo === 'AMBOS') {\n    const monedas = [...new Set([...Object.keys(gastos), ...Object.keys(ingresos)])];\n    msg += '\\n⚖️ <b>Balance:</b> ' + monedas\n      .map(m => '$' + fmt((ingresos[m] || 0) - (gastos[m] || 0)) + ' ' + m).join(' · ');\n  }\n\n  // Top 5 categorías de gasto por moneda\n  if (c.tipo !== 'INGRESO' && !c.categoria) {\n    Object.keys(gastos).forEach(m => {\n      const porCat = {};\n      dentro.filter(f => f.Tipo === 'GASTO' && (f.Moneda || 'ARS') === m).forEach(f => {\n        const k = f['Categoría'] || 'Otros';\n        porCat[k] = (porCat[k] || 0) + (Number(f.Monto) || 0);\n      });\n      const top = Object.entries(porCat).sort((a, b) => b[1] - a[1]).slice(0, 5);\n      msg += '\\n\\n🏷️ <b>Gastos por categoría (' + m + '):</b>\\n' +\n        top.map(([k, v]) => '• ' + esc(k) + ': $' + fmt(v)).join('\\n');\n    });\n  }\n\n  msg += '\\n\\n🧾 ' + dentro.length + (dentro.length === 1 ? ' movimiento' : ' movimientos');\n}\n\nreturn [{ json: { mensaje: msg, chat_id: q.chat_id } }];"
+        "jsCode": "// Suma los movimientos de la hoja que caen en el período pedido, separados por moneda\n// (no se mezclan ARS, USD y EUR), y arma la respuesta para Telegram.\n// Los gastos en pesos se comparan con el mismo período del mes anterior, en nominal y en real\n// (descontando el último IPC publicado, pestaña IPC).\nconst q = $('Limpiar y parsear JSON').first().json;\nconst c = q.consulta;\n\nconst aDia = f => {\n  const m = String(f || '').match(/^(\\d{2})-(\\d{2})-(\\d{4})$/);\n  return m ? Date.UTC(+m[3], +m[2] - 1, +m[1]) / 86400000 : null;\n};\nconst esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst fmt = n => {\n  try { return Number(n).toLocaleString('es-AR', { maximumFractionDigits: 2 }); } catch (e) { return String(n); }\n};\nconst aNumero = v => typeof v === 'number' ? v\n  : Number(String(v || '').replace(/[^\\d,.-]/g, '').replace(/\\./g, '').replace(',', '.')) || 0;\n\nconst desde = aDia(c.desde);\nconst hasta = aDia(c.hasta);\nconst filas = $('Leer movimientos').all().map(i => i.json).filter(f => f && f.Monto !== undefined && f.Monto !== '');\nconst coincide = (f, d0, d1) => {\n  const dia = aDia(f.Fecha);\n  if (dia === null || dia < d0 || dia > d1) return false;\n  if (c.tipo !== 'AMBOS' && f.Tipo !== c.tipo) return false;\n  if (c.categoria && f['Categoría'] !== c.categoria) return false;\n  return true;\n};\nconst dentro = filas.filter(f => coincide(f, desde, hasta));\n\nconst sumar = tipo => {\n  const t = {};\n  dentro.filter(f => f.Tipo === tipo).forEach(f => {\n    const m = f.Moneda || 'ARS';\n    t[m] = (t[m] || 0) + (Number(f.Monto) || 0);\n  });\n  return t;\n};\nconst linea = t => Object.keys(t).length\n  ? Object.entries(t).map(([m, v]) => '$' + fmt(v) + ' ' + m).join(' · ')\n  : '$0';\n\nconst gastos = sumar('GASTO');\nconst ingresos = sumar('INGRESO');\nconst rango = c.desde === c.hasta ? c.desde : c.desde + ' al ' + c.hasta;\n\nlet msg = '📊 <b>Resumen — ' + esc(c.titulo) + '</b>\\n📅 ' + rango;\nif (c.categoria) msg += '\\n🏷️ ' + esc(c.categoria);\n\nif (!dentro.length) {\n  msg += '\\n\\nNo encontré movimientos en ese período.';\n} else {\n  msg += '\\n';\n  if (c.tipo !== 'INGRESO') msg += '\\n💸 <b>Gastos:</b> ' + linea(gastos);\n  if (c.tipo !== 'GASTO') msg += '\\n💰 <b>Ingresos:</b> ' + linea(ingresos);\n  if (c.tipo === 'AMBOS') {\n    const monedas = [...new Set([...Object.keys(gastos), ...Object.keys(ingresos)])];\n    msg += '\\n⚖️ <b>Balance:</b> ' + monedas\n      .map(m => '$' + fmt((ingresos[m] || 0) - (gastos[m] || 0)) + ' ' + m).join(' · ');\n  }\n\n  // Top 5 categorías de gasto por moneda\n  if (c.tipo !== 'INGRESO' && !c.categoria) {\n    Object.keys(gastos).forEach(m => {\n      const porCat = {};\n      dentro.filter(f => f.Tipo === 'GASTO' && (f.Moneda || 'ARS') === m).forEach(f => {\n        const k = f['Categoría'] || 'Otros';\n        porCat[k] = (porCat[k] || 0) + (Number(f.Monto) || 0);\n      });\n      const top = Object.entries(porCat).sort((a, b) => b[1] - a[1]).slice(0, 5);\n      msg += '\\n\\n🏷️ <b>Gastos por categoría (' + m + '):</b>\\n' +\n        top.map(([k, v]) => '• ' + esc(k) + ': $' + fmt(v)).join('\\n');\n    });\n  }\n\n  // Pesos vs el mismo período del mes anterior, nominal y descontando la inflación del último IPC\n  const ipc = $('Leer IPC').all().map(i => i.json).filter(r => r && r.Mes);\n  const ultimoIpc = ipc.length ? aNumero(ipc[ipc.length - 1]['Inflación %']) : null;\n  const mesAntes = d => {\n    const f = new Date(d * 86400000);\n    const y = f.getUTCFullYear(), m = f.getUTCMonth() - 1;\n    const fin = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();\n    return Date.UTC(y, m, Math.min(f.getUTCDate(), fin)) / 86400000;\n  };\n  if (c.tipo !== 'INGRESO' && gastos.ARS && ultimoIpc !== null && hasta - desde <= 31) {\n    const previo = filas\n      .filter(f => f.Tipo === 'GASTO' && (f.Moneda || 'ARS') === 'ARS' && coincide(f, mesAntes(desde), mesAntes(hasta)))\n      .reduce((s, f) => s + (Number(f.Monto) || 0), 0);\n    if (previo > 0) {\n      const nominal = gastos.ARS / previo - 1;\n      const real = (1 + nominal) / (1 + ultimoIpc / 100) - 1;\n      const pct = x => (x >= 0 ? '+' : '') + (x * 100).toFixed(1).replace('.', ',') + '%';\n      msg += '\\n\\n📈 <b>Gastos en pesos vs mismo período del mes anterior:</b> ' + pct(nominal) + ' nominal · ' +\n        pct(real) + ' real (IPC ' + String(ultimoIpc).replace('.', ',') + '%)';\n    }\n  }\n\n  msg += '\\n\\n🧾 ' + dentro.length + (dentro.length === 1 ? ' movimiento' : ' movimientos');\n}\n\nreturn [{ json: { mensaje: msg, chat_id: q.chat_id } }];"
       },
+      "id": "d4bdab60-b032-4293-96d5-59c824114605",
       "name": "Calcular totales",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1520,
-        560
+        1712,
+        656
       ]
     },
     {
       "parameters": {
-        "resource": "message",
-        "operation": "sendMessage",
         "chatId": "={{ $json.chat_id }}",
         "text": "={{ $json.mensaje }}",
-        "replyMarkup": "none",
         "additionalFields": {
           "appendAttribution": false,
           "parse_mode": "HTML"
         }
       },
+      "id": "7046caf5-d247-46d2-89f1-ed1fe6ba7d68",
       "name": "Responder consulta",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1740,
-        560
+        1936,
+        672
       ],
+      "webhookId": "c15064b0-0d8d-4b47-8a68-abb1b4824817",
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
@@ -494,12 +498,13 @@
         },
         "options": {}
       },
+      "id": "80dc4c95-8d94-473c-ba1f-e05a43ffb595",
       "name": "¿Pregunta saldos?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        1136,
-        -16
+        1296,
+        48
       ]
     },
     {
@@ -517,18 +522,19 @@
         },
         "options": {}
       },
+      "id": "10c730c2-3ec9-4955-b423-1a5222162573",
       "name": "Leer saldos",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        1312,
-        800
+        1472,
+        864
       ],
-      "executeOnce": true,
-      "alwaysOutputData": true,
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "executeOnce": true,
       "onError": "continueRegularOutput",
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -539,15 +545,961 @@
     },
     {
       "parameters": {
-        "jsCode": "// Arma la respuesta de \"¿cuánto tengo?\" con la pestaña Saldos: una fila por moneda\n// (ARS, USD, EUR), que nunca se suman entre sí.\nconst q = $('Limpiar y parsear JSON').first().json;\nconst filas = $input.all().map(i => i.json).filter(f => f && f.Moneda);\n\nconst dinero = (n, moneda) => (n < 0 ? '-$' : '$') +\n  Math.abs(n).toLocaleString('es-AR', { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 }) + ' ' + moneda;\nconst aNumero = v => typeof v === 'number' ? v\n  : Number(String(v || '').replace(/[^\\d,.-]/g, '').replace(/\\./g, '').replace(',', '.')) || 0;\n// Actualizado puede venir como texto DD-MM-YYYY o como número de serie de fecha de Sheets\nconst aDia = v => {\n  if (typeof v === 'number') return Math.floor(v) - 25569;\n  const m = String(v || '').match(/^(\\d{2})-(\\d{2})-(\\d{4})$/);\n  return m ? Date.UTC(+m[3], +m[2] - 1, +m[1]) / 86400000 : null;\n};\nconst diaATexto = d => {\n  const f = new Date(d * 86400000);\n  return String(f.getUTCDate()).padStart(2, '0') + '-' + String(f.getUTCMonth() + 1).padStart(2, '0') + '-' + f.getUTCFullYear();\n};\n\nif (!filas.length) {\n  return [{ json: { chat_id: q.chat_id, mensaje: '❌ No pude leer la pestaña Saldos. Probá de nuevo en unos minutos.' } }];\n}\n\nconst ETIQUETAS = { ARS: '🇦🇷 Pesos', USD: '🇺🇸 Dólares', EUR: '🇪🇺 Euros' };\nconst ORDEN = ['ARS', 'USD', 'EUR'];\nconst moneda = f => String(f.Moneda).trim().toUpperCase();\nconst ordenadas = filas.slice().sort((a, b) => {\n  const ia = ORDEN.indexOf(moneda(a)), ib = ORDEN.indexOf(moneda(b));\n  return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);\n});\n\nlet msg = '💳 <b>¿Cuánto tengo?</b>\\n\\n' + ordenadas\n  .map(f => '<b>' + (ETIQUETAS[moneda(f)] || moneda(f)) + ':</b> ' + dinero(aNumero(f.Saldo), moneda(f)))\n  .join('\\n');\n\nconst dias = filas.map(f => aDia(f.Actualizado)).filter(d => d !== null);\nif (dias.length) msg += '\\n\\n🕒 Última actualización: ' + diaATexto(Math.max(...dias));\n\nreturn [{ json: { chat_id: q.chat_id, mensaje: msg } }];\n"
+        "jsCode": "// Arma la respuesta de \"¿cuánto tengo?\" con la pestaña Saldos (una fila por moneda: ARS, USD, EUR,\n// que nunca se suman entre sí) y la pestaña Cripto (saldos de Binance en USD, la escribe cada hora\n// el workflow \"Finanzas - Saldos cripto Binance\"). La cripto se suma solo a los dólares.\nconst q = $('Limpiar y parsear JSON').first().json;\nconst filas = $('Leer saldos').all().map(i => i.json).filter(f => f && f.Moneda);\nconst cripto = $('Leer cripto').all().map(i => i.json).filter(f => f && f.Activo);\n\nconst dinero = (n, moneda) => (n < 0 ? '-$' : '$') +\n  Math.abs(n).toLocaleString('es-AR', { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 }) + ' ' + moneda;\nconst aNumero = v => typeof v === 'number' ? v\n  : Number(String(v || '').replace(/[^\\d,.-]/g, '').replace(/\\./g, '').replace(',', '.')) || 0;\n// La hoja Cripto guarda texto con punto decimal (\"6457.67\"); acepta coma por si se edita a mano.\nconst aNumeroCripto = v => {\n  if (typeof v === 'number') return v;\n  let t = String(v || '').trim().replace(/[^\\d.,-]/g, '');\n  if (t.includes(',')) t = t.replace(/\\./g, '').replace(',', '.');\n  return Number(t) || 0;\n};\n// Actualizado puede venir como texto DD-MM-YYYY o como número de serie de fecha de Sheets\nconst aDia = v => {\n  if (typeof v === 'number') return Math.floor(v) - 25569;\n  const m = String(v || '').match(/^(\\d{2})-(\\d{2})-(\\d{4})$/);\n  return m ? Date.UTC(+m[3], +m[2] - 1, +m[1]) / 86400000 : null;\n};\nconst diaATexto = d => {\n  const f = new Date(d * 86400000);\n  return String(f.getUTCDate()).padStart(2, '0') + '-' + String(f.getUTCMonth() + 1).padStart(2, '0') + '-' + f.getUTCFullYear();\n};\n\nif (!filas.length) {\n  return [{ json: { chat_id: q.chat_id, mensaje: '❌ No pude leer la pestaña Saldos. Probá de nuevo en unos minutos.' } }];\n}\n\nconst ETIQUETAS = { ARS: '🇦🇷 Pesos', USD: '🇺🇸 Dólares', EUR: '🇪🇺 Euros' };\nconst ORDEN = ['ARS', 'USD', 'EUR'];\nconst moneda = f => String(f.Moneda).trim().toUpperCase();\nconst ordenadas = filas.slice().sort((a, b) => {\n  const ia = ORDEN.indexOf(moneda(a)), ib = ORDEN.indexOf(moneda(b));\n  return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);\n});\n\nlet msg = '💳 <b>¿Cuánto tengo?</b>\\n\\n' + ordenadas\n  .map(f => '<b>' + (ETIQUETAS[moneda(f)] || moneda(f)) + ':</b> ' + dinero(aNumero(f.Saldo), moneda(f)))\n  .join('\\n');\n\nconst conValor = cripto.map(f => ({ activo: String(f.Activo).trim(), usd: aNumeroCripto(f['Total USD']) })).filter(c => c.usd > 0);\nif (conValor.length) {\n  const totalCripto = Math.round(conValor.reduce((s, c) => s + c.usd, 0) * 100) / 100;\n  const filaUsd = filas.find(f => moneda(f) === 'USD');\n  const usd = filaUsd ? aNumero(filaUsd.Saldo) : 0;\n  const top = conValor.sort((a, b) => b.usd - a.usd).slice(0, 3)\n    .map(c => c.activo + ' ' + Math.round((c.usd / totalCripto) * 100) + '%').join(' · ');\n  msg += '\\n<b>🪙 Cripto (Binance):</b> ' + dinero(totalCripto, 'USD') + '\\n   ' + top;\n  msg += '\\n\\n💵 <b>Total en dólares (con cripto):</b> ' + dinero(Math.round((usd + totalCripto) * 100) / 100, 'USD');\n} else {\n  msg += '\\n<b>🪙 Cripto (Binance):</b> sin datos por ahora';\n}\n\nconst dias = filas.map(f => aDia(f.Actualizado)).filter(d => d !== null);\nif (dias.length) msg += '\\n\\n🕒 Última actualización: ' + diaATexto(Math.max(...dias));\nconst criptoAct = cripto.length ? String(cripto[0].Actualizado || '').trim() : '';\nif (criptoAct) msg += '\\n🪙 Cripto actualizada: ' + criptoAct;\n\nreturn [{ json: { chat_id: q.chat_id, mensaje: msg } }];\n"
       },
+      "id": "9306cd1c-fcff-41cb-bafd-6bd8e7d8ef3a",
       "name": "Armar saldos",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1552,
-        800
+        1712,
+        864
       ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "TU_GOOGLE_SHEET_ID",
+          "cachedResultName": "Control de Finanzas"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Cripto"
+        },
+        "options": {}
+      },
+      "id": "bbc33f37-841d-45da-8278-db29e5bb9c35",
+      "name": "Leer cripto",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1600,
+        1024
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TU_CREDENCIAL_SHEETS",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "10ac1815-1a94-4b11-8217-c9ae3b3590e0",
+      "name": "¿Es ajuste?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1200,
+        -160
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.tipo }}",
+              "rightValue": "AJUSTE",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e9c2e1bf-3f7c-48ae-9ba2-c1f97540004f",
+      "name": "Leer saldos (ajuste)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1472,
+        1200
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "TU_GOOGLE_SHEET_ID",
+          "cachedResultName": "Control de Finanzas"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Saldos"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TU_CREDENCIAL_SHEETS",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "02323d53-7e66-4a98-ac1f-38404283e046",
+      "name": "Preparar ajuste",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        1200
+      ],
+      "parameters": {
+        "jsCode": "// Reemplaza el saldo total de una moneda (pestaña Saldos, una fila por moneda) por el que pidió el usuario.\nconst q = $('Limpiar y parsear JSON').first().json;\nconst filas = $input.all().map(i => i.json).filter(f => f && f.Moneda);\n\nconst dinero = (n, moneda) => (n < 0 ? '-$' : '$') +\n  Math.abs(n).toLocaleString('es-AR', { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 }) + ' ' + moneda;\n// El Saldo llega como número; por las dudas acepta texto tipo \"781.457,14\"\nconst aNumero = v => typeof v === 'number' ? v\n  : Number(String(v || '').replace(/[^\\d,.-]/g, '').replace(/\\./g, '').replace(',', '.')) || 0;\nconst NOMBRES = { ARS: 'pesos', USD: 'dólares', EUR: 'euros' };\n\nconst moneda = q.moneda;\nconst fila = filas.find(f => String(f.Moneda).trim().toUpperCase() === moneda);\nif (!fila) {\n  return [{ json: { actualizar: false, chat_id: q.chat_id, mensaje: filas.length\n    ? '⚠️ No hay una fila de ' + moneda + ' en la pestaña Saldos. Agregala a mano y probá de nuevo.'\n    : '❌ No pude leer la pestaña Saldos. Probá de nuevo en unos minutos.' } }];\n}\n\nconst anterior = aNumero(fila.Saldo);\nconst nuevo = q.monto;\nconst dif = Math.round((nuevo - anterior) * 100) / 100;\n\nreturn [{\n  json: {\n    actualizar: true,\n    row_number: fila.row_number,\n    saldo_nuevo: nuevo,\n    actualizado: $now.setZone('America/Argentina/Cordoba').toFormat('dd-MM-yyyy'),\n    chat_id: q.chat_id,\n    mensaje: '🔧 <b>Saldo en ' + (NOMBRES[moneda] || moneda) + ' ajustado:</b> ' + dinero(nuevo, moneda) +\n      '\\n(antes ' + dinero(anterior, moneda) + ', diferencia ' + (dif > 0 ? '+' : '') + dinero(dif, moneda) + ')',\n  },\n}];"
+      }
+    },
+    {
+      "id": "2388db2d-76ee-47b3-aac7-9da59a481339",
+      "name": "¿Hay fila de la moneda?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1936,
+        1200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.actualizar }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d8c7b2c9-8dbd-413d-abfe-e02b4888b1c7",
+      "name": "Guardar ajuste",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2160,
+        1104
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "TU_GOOGLE_SHEET_ID",
+          "cachedResultName": "Control de Finanzas"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Saldos"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "value": {
+            "row_number": "={{ $json.row_number }}",
+            "Saldo": "={{ $json.saldo_nuevo }}",
+            "Actualizado": "={{ $json.actualizado }}"
+          },
+          "schema": [
+            {
+              "id": "Moneda",
+              "displayName": "Moneda",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Saldo",
+              "displayName": "Saldo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Actualizado",
+              "displayName": "Actualizado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Notas",
+              "displayName": "Notas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TU_CREDENCIAL_SHEETS",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "f2bb5c92-6c08-464a-8378-6dedfefaadec",
+      "name": "Responder ajuste",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2384,
+        1200
+      ],
+      "parameters": {
+        "chatId": "={{ $('Preparar ajuste').first().json.chat_id }}",
+        "text": "={{ $json.error ? '❌ No pude guardar el ajuste en la pestaña Saldos. Probá de nuevo en unos minutos.' : $('Preparar ajuste').first().json.mensaje }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "webhookId": "b855cf23-8c91-414c-8112-dcb2d6e3f022",
+      "credentials": {
+        "telegramApi": {
+          "id": "TU_CREDENCIAL_TELEGRAM",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "id": "8f330097-e767-43c0-b5e0-1f5a351e7599",
+      "name": "Leer IPC",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1600,
+        656
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "TU_GOOGLE_SHEET_ID",
+          "cachedResultName": "Control de Finanzas"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "IPC"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TU_CREDENCIAL_SHEETS",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "177ab197-6f27-4d39-bf3a-81caa32b4c19",
+      "name": "¿Es foto?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        800,
+        560
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.photo_file_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3cd0a9f8-e815-41d1-8b81-104667a0293a",
+      "name": "Descargar foto",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1000,
+        560
+      ],
+      "parameters": {
+        "resource": "file",
+        "operation": "get",
+        "fileId": "={{ $json.photo_file_id }}",
+        "download": true,
+        "additionalFields": {}
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "webhookId": "07850fa0-5b60-4fe3-a696-0429dade0995",
+      "credentials": {
+        "telegramApi": {
+          "id": "TU_CREDENCIAL_TELEGRAM",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "id": "85265269-5929-4041-8d77-ee394fdaa7f5",
+      "name": "Claude - Leer ticket",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        560
+      ],
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-haiku-5-5"
+        },
+        "inputType": "binary",
+        "binaryPropertyName": "data",
+        "simplify": false,
+        "text": "=Eres un asistente experto en finanzas personales. La imagen debería ser un ticket, factura o comprobante de pago. Devuelve SOLO un objeto JSON válido, sin texto adicional ni bloques markdown.\n\nFECHA DE HOY: {{ $('Extraer datos del mensaje').item.json.fecha_hoy }}\nCOMENTARIO DEL USUARIO (si hay, tiene prioridad sobre lo que veas en el ticket): {{ $('Extraer datos del mensaje').item.json.caption || '(ninguno)' }}\n\nCATEGORÍAS PERMITIDAS: Alimentación / Supermercado, Salidas / Ocio, Servicios y Suscripciones, Salud y Deporte, Farmacia, Transporte / Vehículo, Indumentaria / Compras, Vivienda / Hogar, Educación / Cursos, Donaciones, Ingresos / Sueldo / Extras, Otros.\n\nREGLAS:\n1. monto = el TOTAL final pagado (no subtotales ni líneas sueltas), como número.\n2. moneda: € o EUR → 'EUR'; US$ o USD → 'USD'; $ o pesos → 'ARS'. Si no se ve, 'ARS'.\n3. descripcion = nombre del comercio, breve.\n4. metodo_pago si figura (ej. 'Tarjeta de Débito', 'Tarjeta de Crédito', 'Efectivo', 'Mercado Pago'); si no, vacío.\n5. fecha del ticket en DD-MM-YYYY si se lee; si no, la de hoy.\n6. notas: 'Ticket (foto)' y, si figuran cuotas, agrégalas.\n7. Si la imagen NO es un comprobante de compra o no se puede leer el total, tipo 'INVALIDO'.\n\nFORMATO: {\"fecha\": \"DD-MM-YYYY\", \"tipo\": \"GASTO\" | \"INVALIDO\", \"monto\": number, \"moneda\": \"ARS\" | \"USD\" | \"EUR\", \"categoria\": \"string\", \"descripcion\": \"string\", \"metodo_pago\": \"string\", \"notas\": \"string\"}",
+        "options": {
+          "maxTokens": 500
+        }
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "anthropicApi": {
+          "id": "TU_CREDENCIAL_ANTHROPIC",
+          "name": "Anthropic"
+        }
+      }
+    },
+    {
+      "id": "7a1752c1-140c-463e-a5fb-8e6975fd80d3",
+      "name": "Otros pedidos",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1200,
+        -400
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tipo }}",
+                    "rightValue": "PATRIMONIO",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Patrimonio"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tipo }}",
+                    "rightValue": "PERMITIR",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Puedo gastar"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tipo }}",
+                    "rightValue": "PRESUPUESTO",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Presupuesto"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Resto"
+        }
+      }
+    },
+    {
+      "id": "6d70d0d5-3051-45a5-a617-557e4caa1535",
+      "name": "Leer saldos (patrimonio)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1472,
+        1500
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "TU_GOOGLE_SHEET_ID",
+          "cachedResultName": "Control de Finanzas"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Saldos"
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TU_CREDENCIAL_SHEETS",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "f781801a-2e47-49cb-a663-ac2829405415",
+      "name": "Leer cripto (patrimonio)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1680,
+        1500
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "TU_GOOGLE_SHEET_ID",
+          "cachedResultName": "Control de Finanzas"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Cripto"
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TU_CREDENCIAL_SHEETS",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "7be8b9ff-c7f2-4f28-a623-40db77503040",
+      "name": "Leer historial patrimonio",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1888,
+        1500
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "TU_GOOGLE_SHEET_ID",
+          "cachedResultName": "Control de Finanzas"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Patrimonio"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TU_CREDENCIAL_SHEETS",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "6fa1bb3c-dbcc-4080-81c2-20863e1351ff",
+      "name": "Dólar MEP (bot)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2096,
+        1500
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://dolarapi.com/v1/dolares/bolsa",
+        "authentication": "none",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "executeOnce": true
+    },
+    {
+      "id": "df2beabd-ea45-41d3-aebe-a29cf4626475",
+      "name": "EUR/USD (bot)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2304,
+        1500
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.binance.com/api/v3/ticker/price?symbol=EURUSDT",
+        "authentication": "none",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "executeOnce": true
+    },
+    {
+      "id": "cce53ff0-5647-4e5b-8aeb-94f59f3628d6",
+      "name": "Armar patrimonio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2512,
+        1500
+      ],
+      "parameters": {
+        "jsCode": "// \"¿Cuánto valgo?\": todo el patrimonio en dólares (pesos al MEP, euros con EUR/USD de Binance, cripto en USD)\n// y la variación contra la foto diaria de hace unos 30 días (pestaña Patrimonio).\nconst q = $('Limpiar y parsear JSON').first().json;\nconst saldos = $('Leer saldos (patrimonio)').all().map(i => i.json).filter(f => f && f.Moneda);\nconst cripto = $('Leer cripto (patrimonio)').all().map(i => i.json).filter(f => f && f.Activo);\nconst historial = $('Leer historial patrimonio').all().map(i => i.json).filter(f => f && f.Fecha);\nconst mep = Number($('Dólar MEP (bot)').first().json.venta);\nconst eurUsd = Number($('EUR/USD (bot)').first().json.price);\nif (!(mep > 0) || !(eurUsd > 0)) {\n  return [{ json: { chat_id: q.chat_id, mensaje: '❌ No pude obtener la cotización del dólar ahora. Probá de nuevo en unos minutos.' } }];\n}\n\n// Saldo llega como número o como texto es-AR (\"953.562,87\"); la hoja Cripto usa punto decimal (\"4990.75\")\nconst aNumero = v => typeof v === 'number' ? v\n  : Number(String(v || '').replace(/[^\\d,.-]/g, '').replace(/\\./g, '').replace(',', '.')) || 0;\nconst aNumeroCripto = v => {\n  if (typeof v === 'number') return v;\n  let t = String(v || '').trim().replace(/[^\\d.,-]/g, '');\n  if (t.includes(',')) t = t.replace(/\\./g, '').replace(',', '.');\n  return Number(t) || 0;\n};\nconst fmt = (n, d) => Number(n).toLocaleString('es-AR', { minimumFractionDigits: d || 0, maximumFractionDigits: d || 0 });\nconst saldo = m => { const f = saldos.find(s => String(s.Moneda).trim().toUpperCase() === m); return f ? aNumero(f.Saldo) : 0; };\nconst aDia = f => { const m = String(f || '').match(/^(\\d{2})-(\\d{2})-(\\d{4})$/); return m ? Date.UTC(+m[3], +m[2] - 1, +m[1]) / 86400000 : null; };\n\nconst ars = saldo('ARS'), usd = saldo('USD'), eur = saldo('EUR');\nconst criptoUsd = cripto.reduce((s, c) => s + aNumeroCripto(c['Total USD']), 0);\nconst partes = [\n  { et: '🇦🇷 Pesos', usd: ars / mep, extra: '$' + fmt(ars) + ' ARS' },\n  { et: '🇺🇸 Dólares', usd: usd, extra: '' },\n  { et: '🇪🇺 Euros', usd: eur * eurUsd, extra: '€' + fmt(eur) },\n  { et: '🪙 Cripto', usd: criptoUsd, extra: '' },\n];\nconst total = partes.reduce((s, p) => s + p.usd, 0);\n\nlet msg = '💼 <b>Patrimonio total: US$ ' + fmt(total) + '</b>\\n≈ $' + fmt(total * mep) + ' ARS (dólar MEP $' + fmt(mep, 2) + ')\\n';\nfor (const p of partes) {\n  msg += '\\n' + p.et + ': US$ ' + fmt(p.usd) + ' (' + (total ? Math.round(p.usd / total * 100) : 0) + '%)' + (p.extra ? ' · ' + p.extra : '');\n}\n\nconst hoyDia = aDia($now.setZone('America/Argentina/Cordoba').toFormat('dd-MM-yyyy'));\nconst previo = historial\n  .map(h => ({ dia: aDia(h.Fecha), total: aNumero(h['Total USD']) }))\n  .filter(h => h.dia !== null && h.dia <= hoyDia - 30 && h.total > 0)\n  .sort((a, b) => b.dia - a.dia)[0];\nif (previo) {\n  const dif = total - previo.total;\n  msg += '\\n\\n📈 vs hace ' + (hoyDia - previo.dia) + ' días: ' + (dif >= 0 ? '+' : '-') + 'US$ ' + fmt(Math.abs(dif)) +\n    ' (' + (dif >= 0 ? '+' : '') + (dif / previo.total * 100).toFixed(1).replace('.', ',') + '%)';\n} else {\n  msg += '\\n\\n<i>📈 La evolución aparece cuando haya fotos diarias de hace más de 30 días.</i>';\n}\n\nreturn [{ json: { chat_id: q.chat_id, mensaje: msg } }];"
+      }
+    },
+    {
+      "id": "852f7df1-c6ea-4d61-b6b5-adb7f91fef92",
+      "name": "Responder patrimonio",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2720,
+        1500
+      ],
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.mensaje }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "webhookId": "5a2793f5-37a3-45e8-807a-77cf3a45fa73",
+      "credentials": {
+        "telegramApi": {
+          "id": "TU_CREDENCIAL_TELEGRAM",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "id": "9209a499-28ff-42f7-a335-ceded7a6f7ad",
+      "name": "Leer movimientos (permitir)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1472,
+        1750
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "TU_GOOGLE_SHEET_ID",
+          "cachedResultName": "Control de Finanzas"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Transacciones"
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TU_CREDENCIAL_SHEETS",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "a84208df-d727-461a-ab43-395f4fdb0738",
+      "name": "Leer saldos (permitir)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1680,
+        1750
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "TU_GOOGLE_SHEET_ID",
+          "cachedResultName": "Control de Finanzas"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Saldos"
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TU_CREDENCIAL_SHEETS",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "e8731834-22c1-4e7d-85d3-8d28d970c566",
+      "name": "Leer presupuestos (permitir)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1888,
+        1750
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "TU_GOOGLE_SHEET_ID",
+          "cachedResultName": "Control de Finanzas"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Presupuestos"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TU_CREDENCIAL_SHEETS",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "893dddc5-3a0a-4026-abe6-f46a17fa1ac2",
+      "name": "Evaluar compra",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2096,
+        1750
+      ],
+      "parameters": {
+        "jsCode": "// \"¿Puedo gastar X en Y?\": cruza el saldo de esa moneda, lo gastado este mes en la categoría,\n// el promedio de los 3 meses anteriores y el presupuesto (si hay). No registra nada.\nconst q = $('Limpiar y parsear JSON').first().json;\nconst filas = $('Leer movimientos (permitir)').all().map(i => i.json).filter(f => f && f.Monto !== undefined && f.Monto !== '');\nconst saldos = $('Leer saldos (permitir)').all().map(i => i.json).filter(f => f && f.Moneda);\nconst presupuestos = $('Leer presupuestos (permitir)').all().map(i => i.json).filter(f => f && f['Categoría']);\n\nconst aNumero = v => typeof v === 'number' ? v\n  : Number(String(v || '').replace(/[^\\d,.-]/g, '').replace(/\\./g, '').replace(',', '.')) || 0;\nconst esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst dinero = (n, m) => (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('es-AR', { maximumFractionDigits: 2 }) + ' ' + m;\nconst claveMes = f => { const m = String(f || '').match(/^(\\d{2})-(\\d{2})-(\\d{4})$/); return m ? +m[3] * 12 + (+m[2] - 1) : null; };\n\nconst hoy = $now.setZone('America/Argentina/Cordoba');\nconst mesActual = hoy.year * 12 + (hoy.month - 1);\nconst porMes = {};\nfor (const f of filas) {\n  if (f.Tipo !== 'GASTO' || String(f.Moneda || 'ARS').toUpperCase() !== q.moneda || f['Categoría'] !== q.categoria) continue;\n  const k = claveMes(f.Fecha);\n  if (k !== null) porMes[k] = (porMes[k] || 0) + (Number(f.Monto) || 0);\n}\nconst gastadoMes = porMes[mesActual] || 0;\nconst previos = [1, 2, 3].map(i => porMes[mesActual - i] || 0).filter(v => v > 0);\nconst promedio = previos.length ? previos.reduce((a, b) => a + b, 0) / previos.length : 0;\nconst filaSaldo = saldos.find(s => String(s.Moneda).trim().toUpperCase() === q.moneda);\nconst saldo = filaSaldo ? aNumero(filaSaldo.Saldo) : null;\nconst pres = presupuestos.find(p => p['Categoría'] === q.categoria && String(p.Moneda || 'ARS').toUpperCase() === q.moneda && aNumero(p['Monto mensual']) > 0);\nconst tope = pres ? aNumero(pres['Monto mensual']) : 0;\nconst despues = gastadoMes + q.monto;\n\nlet veredicto;\nif (saldo !== null && saldo - q.monto < 0) veredicto = '🔴 <b>No te alcanza el saldo</b> en ' + q.moneda + '.';\nelse if (tope && despues > tope) veredicto = '🔴 <b>Te pasarías del presupuesto</b> por ' + dinero(despues - tope, q.moneda) + '.';\nelse if (tope && despues > tope * 0.8) veredicto = '🟡 <b>Podés, pero ojo:</b> usarías el ' + Math.round(despues / tope * 100) + '% del presupuesto del mes.';\nelse if (promedio && despues > promedio * 1.3) veredicto = '🟡 <b>Podés, pero ojo:</b> quedarías ' + Math.round((despues / promedio - 1) * 100) + '% arriba de tu promedio en esta categoría.';\nelse veredicto = '🟢 <b>Sí, dale.</b> Está dentro de lo normal para vos.';\n\nconst lineas = ['🤔 <b>¿' + esc(q.descripcion || 'Este gasto') + ' por ' + dinero(q.monto, q.moneda) + '?</b>', '', veredicto, ''];\nif (saldo !== null) lineas.push('💳 Saldo en ' + q.moneda + ': ' + dinero(saldo, q.moneda) + ' → quedaría ' + dinero(saldo - q.monto, q.moneda));\nlineas.push('🏷️ ' + esc(q.categoria) + ' este mes: ' + dinero(gastadoMes, q.moneda) + (promedio ? ' (promedio mensual ' + dinero(Math.round(promedio), q.moneda) + ')' : ''));\nif (tope) lineas.push('🎯 Presupuesto: ' + dinero(tope, q.moneda) + ' → usarías ' + Math.round(despues / tope * 100) + '%');\nlineas.push('', '<i>No registré nada: si lo comprás, contámelo como gasto.</i>');\n\nreturn [{ json: { chat_id: q.chat_id, mensaje: lineas.join('\\n') } }];"
+      }
+    },
+    {
+      "id": "0548ca62-49a6-438f-8f73-f8f20c031468",
+      "name": "Responder puedo gastar",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2304,
+        1750
+      ],
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.mensaje }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "webhookId": "e8773560-57d4-472a-9684-5c088ebce42f",
+      "credentials": {
+        "telegramApi": {
+          "id": "TU_CREDENCIAL_TELEGRAM",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "id": "05c60ac8-4a07-45ee-98ab-a3c354854457",
+      "name": "Guardar presupuesto",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1472,
+        2000
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "TU_GOOGLE_SHEET_ID",
+          "cachedResultName": "Control de Finanzas"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Presupuestos"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "Categoría"
+          ],
+          "value": {
+            "Categoría": "={{ $json.categoria }}",
+            "Monto mensual": "={{ $json.monto }}",
+            "Moneda": "={{ $json.moneda }}"
+          },
+          "schema": [
+            {
+              "id": "Categoría",
+              "displayName": "Categoría",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Monto mensual",
+              "displayName": "Monto mensual",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Moneda",
+              "displayName": "Moneda",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TU_CREDENCIAL_SHEETS",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "ae5b6931-e4fb-4a0a-b445-dfd8156b7339",
+      "name": "Responder presupuesto",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1680,
+        2000
+      ],
+      "parameters": {
+        "chatId": "={{ $('Limpiar y parsear JSON').first().json.chat_id }}",
+        "text": "={{ $json.error ? '❌ No pude guardar el presupuesto. Probá de nuevo en unos minutos.' : ($('Limpiar y parsear JSON').first().json.monto > 0 ? '🎯 <b>Presupuesto guardado:</b> ' + $('Limpiar y parsear JSON').first().json.categoria + ' → $' + $('Limpiar y parsear JSON').first().json.monto.toLocaleString('es-AR') + ' ' + $('Limpiar y parsear JSON').first().json.moneda + ' por mes.\\nTe aviso con 🟡 al 80% y 🔴 al 100% cada vez que cargues un gasto de esa categoría.' : '🎯 Presupuesto de ' + $('Limpiar y parsear JSON').first().json.categoria + ' eliminado.') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "webhookId": "10d23c23-f4e8-431d-a0d5-3178ec0d20b7",
+      "credentials": {
+        "telegramApi": {
+          "id": "TU_CREDENCIAL_TELEGRAM",
+          "name": "Telegram account"
+        }
+      }
     }
   ],
   "connections": {
@@ -584,7 +1536,7 @@
         ],
         [
           {
-            "node": "Responder mensaje inválido",
+            "node": "¿Es foto?",
             "type": "main",
             "index": 0
           }
@@ -603,17 +1555,6 @@
         [
           {
             "node": "Avisar error al usuario",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Limpiar y parsear JSON": {
-      "main": [
-        [
-          {
-            "node": "¿Pregunta saldos?",
             "type": "main",
             "index": 0
           }
@@ -660,7 +1601,7 @@
       "main": [
         [
           {
-            "node": "Calcular totales",
+            "node": "Leer IPC",
             "type": "main",
             "index": 0
           }
@@ -703,7 +1644,29 @@
         ]
       ]
     },
+    "Armar saldos": {
+      "main": [
+        [
+          {
+            "node": "Responder consulta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Leer saldos": {
+      "main": [
+        [
+          {
+            "node": "Leer cripto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer cripto": {
       "main": [
         [
           {
@@ -714,11 +1677,298 @@
         ]
       ]
     },
-    "Armar saldos": {
+    "¿Es ajuste?": {
       "main": [
         [
           {
-            "node": "Responder consulta",
+            "node": "Leer saldos (ajuste)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Pregunta saldos?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer saldos (ajuste)": {
+      "main": [
+        [
+          {
+            "node": "Preparar ajuste",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar ajuste": {
+      "main": [
+        [
+          {
+            "node": "¿Hay fila de la moneda?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay fila de la moneda?": {
+      "main": [
+        [
+          {
+            "node": "Guardar ajuste",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder ajuste",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar ajuste": {
+      "main": [
+        [
+          {
+            "node": "Responder ajuste",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer IPC": {
+      "main": [
+        [
+          {
+            "node": "Calcular totales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es foto?": {
+      "main": [
+        [
+          {
+            "node": "Descargar foto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder mensaje inválido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar foto": {
+      "main": [
+        [
+          {
+            "node": "Claude - Leer ticket",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Avisar error al usuario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude - Leer ticket": {
+      "main": [
+        [
+          {
+            "node": "Limpiar y parsear JSON",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Avisar error al usuario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpiar y parsear JSON": {
+      "main": [
+        [
+          {
+            "node": "Otros pedidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Otros pedidos": {
+      "main": [
+        [
+          {
+            "node": "Leer saldos (patrimonio)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Leer movimientos (permitir)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Guardar presupuesto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Es ajuste?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer saldos (patrimonio)": {
+      "main": [
+        [
+          {
+            "node": "Leer cripto (patrimonio)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer cripto (patrimonio)": {
+      "main": [
+        [
+          {
+            "node": "Leer historial patrimonio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer historial patrimonio": {
+      "main": [
+        [
+          {
+            "node": "Dólar MEP (bot)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dólar MEP (bot)": {
+      "main": [
+        [
+          {
+            "node": "EUR/USD (bot)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EUR/USD (bot)": {
+      "main": [
+        [
+          {
+            "node": "Armar patrimonio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar patrimonio": {
+      "main": [
+        [
+          {
+            "node": "Responder patrimonio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer movimientos (permitir)": {
+      "main": [
+        [
+          {
+            "node": "Leer saldos (permitir)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer saldos (permitir)": {
+      "main": [
+        [
+          {
+            "node": "Leer presupuestos (permitir)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer presupuestos (permitir)": {
+      "main": [
+        [
+          {
+            "node": "Evaluar compra",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluar compra": {
+      "main": [
+        [
+          {
+            "node": "Responder puedo gastar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar presupuesto": {
+      "main": [
+        [
+          {
+            "node": "Responder presupuesto",
             "type": "main",
             "index": 0
           }

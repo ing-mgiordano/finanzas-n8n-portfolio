@@ -90,10 +90,10 @@ const filas = $input.all().map(i => i.json).filter(f => f && f.Moneda);
 const normalizar = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');
 const tiene = (s, palabra) => new RegExp('(^|[^a-z])' + palabra + '([^a-z]|$)').test(s);
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-// "$12.345,67 ARS", "-$3.000 ARS"
+// "$781.457,14 ARS", "-$3.000 ARS"
 const dinero = (n, moneda) => (n < 0 ? '-$' : '$') +
   Math.abs(n).toLocaleString('es-AR', { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 }) + ' ' + moneda;
-// El Saldo llega como número; por las dudas acepta texto tipo "12.345,67"
+// El Saldo llega como número; por las dudas acepta texto tipo "781.457,14"
 const aNumero = v => typeof v === 'number' ? v
   : Number(String(v || '').replace(/[^\\d,.-]/g, '').replace(/\\./g, '').replace(',', '.')) || 0;
 const NOMBRES = { ARS: 'pesos', USD: 'dólares', EUR: 'euros' };
@@ -353,12 +353,79 @@ const updateBalance = node({
   }
 });
 
+const semaforoCode = `// Semáforo de presupuesto: si el gasto es de una categoría con presupuesto (pestaña Presupuestos),
+// suma lo gastado en el mes (incluido este) y avisa con 🟡 desde el 80% y 🔴 desde el 100%.
+// También arma la línea de saldo, avisando si no se pudo actualizar.
+const mov = $('Buscar duplicados').first().json;
+const calc = $('Calcular saldo').first().json;
+let errorSaldo = false;
+try { const a = $('Actualizar saldo'); errorSaldo = a.isExecuted && !!a.first().json.error; } catch (e) {}
+const lineaSaldo = errorSaldo
+  ? '\\n\\n⚠️ No pude actualizar el saldo en ' + calc.cuenta + '; corregilo a mano en la pestaña Saldos.'
+  : calc.linea_saldo;
+
+const aNumero = v => typeof v === 'number' ? v
+  : Number(String(v || '').replace(/[^\\d,.-]/g, '').replace(/\\./g, '').replace(',', '.')) || 0;
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const moneda = String(mov.moneda || 'ARS').toUpperCase();
+const presupuestos = $input.all().map(i => i.json).filter(p => p && p['Categoría']);
+const pres = mov.tipo === 'GASTO'
+  ? presupuestos.find(p => p['Categoría'] === mov.categoria && String(p.Moneda || 'ARS').toUpperCase() === moneda && aNumero(p['Monto mensual']) > 0)
+  : null;
+
+let lineaSemaforo = '';
+if (pres) {
+  const tope = aNumero(pres['Monto mensual']);
+  const mesDe = f => { const m = String(f || '').match(/^\\d{2}-(\\d{2})-(\\d{4})$/); return m ? m[2] + '-' + m[1] : null; };
+  const mes = mesDe(mov.fecha);
+  // Leer movimientos se leyó antes de guardar, así que se suma este gasto aparte
+  const gastado = $('Leer movimientos').all().map(i => i.json)
+    .filter(f => f && f.Tipo === 'GASTO' && f['Categoría'] === mov.categoria && String(f.Moneda || 'ARS').toUpperCase() === moneda && mesDe(f.Fecha) === mes)
+    .reduce((s, f) => s + (Number(f.Monto) || 0), 0) + Number(mov.monto);
+  const pct = Math.round(gastado / tope * 100);
+  const dinero = n => '$' + n.toLocaleString('es-AR', { maximumFractionDigits: 2 }) + ' ' + moneda;
+  if (pct >= 80) {
+    lineaSemaforo = '\\n\\n' + (pct >= 100 ? '🔴' : '🟡') + ' <b>Presupuesto ' + esc(mov.categoria) + ':</b> ' +
+      dinero(gastado) + ' de ' + dinero(tope) + ' (' + pct + '%)' +
+      (pct >= 100 ? ' — te pasaste por ' + dinero(gastado - tope) : ' — quedan ' + dinero(tope - gastado));
+  }
+}
+
+return [{ json: { linea_saldo: lineaSaldo, linea_semaforo: lineaSemaforo } }];`;
+
+const readBudgets = node({
+  type: 'n8n-nodes-base.googleSheets',
+  version: 4.7,
+  config: {
+    name: 'Leer presupuestos',
+    position: [2448, 208],
+    executeOnce: true,
+    alwaysOutputData: true,
+    retryOnFail: true,
+    maxTries: 3,
+    waitBetweenTries: 2000,
+    onError: 'continueRegularOutput',
+    parameters: { resource: 'sheet', operation: 'read', authentication: 'oAuth2', documentId: doc, sheetName: { __rl: true, mode: 'name', value: 'Presupuestos' }, options: {} },
+    credentials: sheetsCred
+  }
+});
+
+const calcBudget = node({
+  type: 'n8n-nodes-base.code',
+  version: 2,
+  config: {
+    name: 'Calcular semáforo',
+    position: [2672, 208],
+    parameters: { mode: 'runOnceForAllItems', language: 'javaScript', jsCode: semaforoCode }
+  }
+});
+
 const confirmOk = node({
   type: 'n8n-nodes-base.telegram',
   version: 1.2,
   config: {
     name: 'Confirmar registro',
-    position: [2448, 208],
+    position: [2896, 208],
     retryOnFail: true,
     maxTries: 3,
     waitBetweenTries: 2000,
@@ -366,8 +433,7 @@ const confirmOk = node({
       resource: 'message',
       operation: 'sendMessage',
       chatId: expr("{{ $('Buscar duplicados').first().json.chat_id }}"),
-      // Si Actualizar saldo falló, llega con json.error
-      text: expr("{{ $('Buscar duplicados').first().json.mensaje_ok }}{{ $json.error ? '\\n\\n⚠️ No pude actualizar el saldo en ' + $('Calcular saldo').first().json.cuenta + '; corregilo a mano en la pestaña Saldos.' : $('Calcular saldo').first().json.linea_saldo }}"),
+      text: expr("{{ $('Buscar duplicados').first().json.mensaje_ok }}{{ $json.linea_saldo }}{{ $json.linea_semaforo }}"),
       replyMarkup: 'none',
       additionalFields: { appendAttribution: false, parse_mode: 'HTML' }
     },
@@ -431,7 +497,10 @@ export default workflow('finanzas-registrar', 'Finanzas - Registrar movimiento (
   .to(readBalances)
   .to(calcBalance)
   .to(changesBalance
-    .onTrue(updateBalance.to(confirmOk))
-    .onFalse(confirmOk))
+    .onTrue(updateBalance.to(readBudgets))
+    .onFalse(readBudgets))
+  .add(readBudgets)
+  .to(calcBudget)
+  .to(confirmOk)
   .add(saveRow.onError(notifyError))
   .add(notes);
